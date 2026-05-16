@@ -1839,3 +1839,398 @@ void h_contest_loop(H_ContestState *s) {
     safe_differential_drive(speed + steer, speed - steer);
 }
 ```
+
+---
+
+## 十一、2023 年电赛 E 题 — 运动目标控制与自动追踪系统
+
+### 系统架构
+
+```
+┌──── RED 系统 (独立MCU) ────┐     ┌──── GREEN 系统 (独立MCU) ────┐
+│                             │     │                               │
+│  MSPM0G #1                  │     │  MSPM0G #2                    │
+│  ├─ 键盘(模式选择+启动)      │     │  ├─ OV7725+FIFO(摄像头)        │
+│  ├─ OLED(显示当前路径)       │     │  ├─ OLED(显示追踪状态)          │
+│  ├─ 舵机1(Pan)              │     │  ├─ 舵机1(Pan)                │
+│  ├─ 舵机2(Tilt)             │     │  ├─ 舵机2(Tilt)              │
+│  └─ 红色激光笔(MOS驱动)      │     │  └─ 绿色激光笔(MOS驱动)        │
+└─────────────────────────────┘     └───────────────────────────────┘
+         ↕ 不能通信 ↕                         ↕ 摄像头 ↕
+    ┌─────────────────────────────────────────────────────┐
+    │           白色屏幕 (1m 前方, >0.6×0.6m)              │
+    │    ┌─────────────────────┐                          │
+    │    │   0.5m×0.5m 正方形   │                          │
+    │    │   中心 = 原点(0,0)    │                          │
+    │    └─────────────────────┘                          │
+    └─────────────────────────────────────────────────────┘
+```
+
+**坐标系 (屏幕平面，单位 cm)：**
+- 原点: (0, 0) = 屏幕中心
+- 正方形: (±25, ±25)
+- 屏幕距云台: 100cm (Z方向)
+- Pan/Tilt 角度: 绕 Z 轴 / 绕水平轴
+
+### --- 红色系统: 路径生成 ---
+
+**正方形边线路径 (基本要求2)：**
+```c
+// 屏幕 0.5m×0.5m, 边线路径: 上→右→下→左, 顺时针
+// 光斑距边线 ≤2cm, 即路径在 ±23cm 处 (中心往边 25cm 减 2cm)
+#define SQ_HALF  23.0f  // 正方形半边距
+
+typedef struct {
+    float x, y;    // 屏幕坐标 (cm)
+} Point2D;
+
+// 正方形路径 (50个采样点, 30秒走一圈 → 每点 0.6s → 每步 4cm)
+static Point2D square_path[200];
+static uint16_t  square_path_len = 0;
+
+void generate_square_path(void) {
+    // 上边: (SQ_HALF, -SQ_HALF) → (SQ_HALF, SQ_HALF)  右移
+    // 左边: (SQ_HALF, SQ_HALF) → (-SQ_HALF, SQ_HALF)   下移
+    // 下边: (-SQ_HALF, SQ_HALF) → (-SQ_HALF, -SQ_HALF) 左移
+    // 右边: (-SQ_HALF, -SQ_HALF) → (SQ_HALF, -SQ_HALF) 上移
+    // 用 Bresenham 或直接等距采样填充
+    float step = 1.0f;  // 每步 1cm
+    float xs[] = { SQ_HALF,  SQ_HALF, -SQ_HALF, -SQ_HALF,  SQ_HALF};
+    float ys[] = {-SQ_HALF,  SQ_HALF,  SQ_HALF, -SQ_HALF, -SQ_HALF};
+    int idx = 0;
+    for (int seg = 0; seg < 4; seg++) {
+        float dx = xs[seg+1] - xs[seg];
+        float dy = ys[seg+1] - ys[seg];
+        float dist = sqrtf(dx*dx + dy*dy);
+        int steps = (int)(dist / step);
+        for (int i = 0; i < steps; i++) {
+            float t = (float)i / steps;
+            square_path[idx].x = xs[seg] + dx * t;
+            square_path[idx].y = ys[seg] + dy * t;
+            idx++;
+        }
+    }
+    square_path_len = idx;
+}
+```
+
+**A4 靶纸路径 (基本要求3/4)：**
+```c
+// A4: 29.7cm×21cm, 胶带宽 1.8cm
+// 光斑沿胶带中心线移动 → 路径比 A4 边缘内移 0.9cm
+#define A4_HALF_W  14.85f  // 29.7/2
+#define A4_HALF_H  10.5f   // 21/2
+#define TAPE_OFFSET 0.9f   // 胶带半宽
+
+static Point2D a4_path[200];
+static uint16_t  a4_path_len = 0;
+
+// 旋转任意角度 θ (弧度)
+void generate_a4_path(float center_x, float center_y, float theta) {
+    float hw = A4_HALF_W - TAPE_OFFSET;
+    float hh = A4_HALF_H - TAPE_OFFSET;
+    float corners[4][2] = {
+        { hw, -hh}, { hw,  hh}, {-hw,  hh}, {-hw, -hh}
+    };
+    // 旋转 + 平移
+    float c = cosf(theta), s = sinf(theta);
+    float xs[5], ys[5];
+    for (int i = 0; i < 4; i++) {
+        float rx = corners[i][0]*c - corners[i][1]*s + center_x;
+        float ry = corners[i][0]*s + corners[i][1]*c + center_y;
+        xs[i] = rx; ys[i] = ry;
+    }
+    xs[4] = xs[0]; ys[4] = ys[0];  // 闭合
+
+    float step = 0.8f;
+    int idx = 0;
+    for (int seg = 0; seg < 4; seg++) {
+        float dx = xs[seg+1] - xs[seg];
+        float dy = ys[seg+1] - ys[seg];
+        float dist = sqrtf(dx*dx + dy*dy);
+        int steps = (int)(dist / step);
+        for (int i = 0; i < steps; i++) {
+            float t = (float)i / steps;
+            a4_path[idx].x = xs[seg] + dx * t;
+            a4_path[idx].y = ys[seg] + dy * t;
+            idx++;
+        }
+    }
+    a4_path_len = idx;
+}
+```
+
+**屏幕坐标 → 云台角度：**
+```c
+#define SCREEN_DIST 100.0f  // 屏幕距云台 1m = 100cm
+
+void screen_to_gimbal(float sx, float sy, float *pan, float *tilt) {
+    // sx, sy: 屏幕上的目标坐标 (cm), 原点(0,0)=屏幕中心
+    // 转换: 水平偏移 → Pan角, 垂直偏移+距离 → Tilt角
+    *pan  = atan2f(sx, SCREEN_DIST) * 57.29578f;
+    float h_dist = sqrtf(SCREEN_DIST*SCREEN_DIST + sx*sx);
+    *tilt = atan2f(sy, h_dist) * 57.29578f;
+}
+```
+
+**红色系统主控：**
+```c
+typedef enum {
+    RED_IDLE,
+    RED_RESET,      // 基本要求1: 回到原点
+    RED_SQUARE,     // 基本要求2: 正方形边线
+    RED_A4_NORMAL,  // 基本要求3: A4靶纸
+    RED_A4_ROTATED, // 基本要求4: 旋转A4靶纸
+    RED_PAUSED,     // 制动
+} RedState;
+
+void red_system_loop(RedState *state, uint32_t *path_idx, uint32_t elapsed_ms) {
+    Point2D target;
+    switch (*state) {
+    case RED_RESET:
+        target.x = 0; target.y = 0;  // 原点
+        if (elapsed_ms > 1000) *state = RED_IDLE;  // 1秒到原点
+        break;
+    case RED_SQUARE:
+        // 30秒 200步 → 每步 150ms
+        *path_idx = (elapsed_ms / 150) % square_path_len;
+        if (elapsed_ms > 30000) *state = RED_IDLE;
+        target = square_path[*path_idx];
+        break;
+    case RED_A4_NORMAL:
+    case RED_A4_ROTATED:
+        *path_idx = (elapsed_ms / 150) % a4_path_len;
+        if (elapsed_ms > 30000) *state = RED_IDLE;
+        target = a4_path[*path_idx];
+        break;
+    case RED_PAUSED:
+        return;  // 不动
+    default: return;
+    }
+    float pan, tilt;
+    screen_to_gimbal(target.x, target.y, &pan, &tilt);
+    gimbal_set_pan(pan);
+    gimbal_set_tilt(tilt);
+}
+```
+
+### --- 绿色系统: 摄像头红光斑检测 ---
+
+```c
+// OV7725 + AL422B FIFO 摄像头模块
+// 典型连接: 8-bit parallel D0~D7 + PCLK + VSYNC + HREF
+// FIFO 读: 先拉低 OE, 再给 RE 脉冲读出 1 字节
+
+// 简化方案: 只读 80×60 下采样图像, 仅检查红色通道
+#define CAM_WIDTH   80
+#define CAM_HEIGHT  60
+#define RED_THRESHOLD  200  // R 通道阈值 (0~255), 按实测调整
+#define MIN_RED_PIXELS  5   // 最少红色像素数
+
+typedef struct {
+    uint16_t sum_x, sum_y;
+    uint16_t count;
+    float    cx, cy;  // 光斑中心 (屏幕坐标 cm)
+    bool     detected;
+} RedSpot;
+
+// 从 FIFO 读一帧并检测红光斑
+// 原理: 仅读 R 分量(每像素 2 字节 RGB565), 超过阈值则累计质心
+RedSpot detect_red_spot(void) {
+    RedSpot spot = {0};
+
+    // FIFO 复位读指针
+    fifo_reset_read();
+
+    for (int y = 0; y < CAM_HEIGHT; y++) {
+        for (int x = 0; x < CAM_WIDTH; x++) {
+            uint16_t pixel = fifo_read_16();  // RGB565
+            uint8_t r = (pixel >> 11) & 0x1F; // R 分量 5-bit
+            r = (r << 3) | (r >> 2);           // 扩展到 8-bit
+            if (r > RED_THRESHOLD) {
+                spot.sum_x += x;
+                spot.sum_y += y;
+                spot.count++;
+            }
+        }
+    }
+
+    if (spot.count >= MIN_RED_PIXELS) {
+        spot.detected = true;
+        // 像素坐标 → 屏幕坐标
+        // 假设摄像头视角与屏幕对应, 屏幕 50cm 范围映射到 80px
+        float scale_x = 50.0f / CAM_WIDTH;   // cm/pixel
+        float scale_y = 50.0f / CAM_HEIGHT;
+        spot.cx = ((float)spot.sum_x / spot.count - CAM_WIDTH/2)  * scale_x;
+        spot.cy = ((float)spot.sum_y / spot.count - CAM_HEIGHT/2) * scale_y;
+    }
+
+    return spot;
+}
+
+// FIFO 基础操作 (GPIO 模拟)
+#define FIFO_OE_PIN  DL_GPIO_PIN_14  // PA14
+#define FIFO_RE_PIN  DL_GPIO_PIN_15  // PA15
+// D0~D7 接 GPIOB 全口
+
+uint16_t fifo_read_16(void) {
+    uint8_t hi, lo;
+    DL_GPIO_clearPins(GPIOA, FIFO_OE_PIN);    // OE=0
+    DL_GPIO_clearPins(GPIOA, FIFO_RE_PIN);    delay_us(1);
+    hi = DL_GPIO_readPins(GPIOB, 0xFF);       // 读 D0~D7
+    DL_GPIO_setPins(GPIOA, FIFO_RE_PIN);      // RE=1
+    DL_GPIO_clearPins(GPIOA, FIFO_RE_PIN);    delay_us(1);
+    lo = DL_GPIO_readPins(GPIOB, 0xFF);
+    DL_GPIO_setPins(GPIOA, FIFO_RE_PIN);
+    DL_GPIO_setPins(GPIOA, FIFO_OE_PIN);      // OE=1
+    return ((uint16_t)hi << 8) | lo;
+}
+```
+
+**无摄像头的简化方案 — 四象限光电传感器：**
+```c
+// 如果摄像方案太复杂, 可用 4 个光敏电阻/光电管构成四象限检测
+// 4 个传感器对准屏幕, 比较各象限亮度 → 估算红点位置
+// 精度低于摄像方案, 但 MCU 开销极小
+
+typedef struct {
+    uint16_t top_left, top_right, bot_left, bot_right;
+} QuadrantSensor;
+
+Point2D quadrant_to_position(QuadrantSensor *q) {
+    float total = q->tl + q->tr + q->bl + q->br + 1;
+    float x = ((q->tr + q->br) - (q->tl + q->bl)) / total * 25.0f;
+    float y = ((q->bl + q->br) - (q->tl + q->tr)) / total * 25.0f;
+    return (Point2D){x, y};
+}
+```
+
+### --- 绿色系统: 视觉追踪闭环 ---
+
+```c
+typedef enum {
+    GREEN_IDLE,
+    GREEN_TRACKING,   // 追踪中
+    GREEN_LOST,       // 丢失目标
+    GREEN_PAUSED,     // 制动
+} GreenState;
+
+// 视觉追踪 PID (两个独立的 PID: X方向 + Y方向)
+PID_Controller pid_track_x;  // X→Pan
+PID_Controller pid_track_y;  // Y→Tilt
+
+void green_system_loop(GreenState *state) {
+    RedSpot spot = detect_red_spot();
+
+    if (!spot.detected) {
+        *state = GREEN_LOST;
+        // 丢失目标: 扫描搜索 (缓慢扫 Pan)
+        static float scan_angle = -45;
+        scan_angle += 0.5f;
+        if (scan_angle > 45) scan_angle = -45;
+        gimbal_set_pan(scan_angle);
+        return;
+    }
+
+    *state = GREEN_TRACKING;
+
+    // X/Y 误差 → PID → 修正云台角度
+    float current_pan  = pid_get_last_output(&pid_track_x);
+    float current_tilt = pid_get_last_output(&pid_track_y);
+
+    float pan_correction  = pid_update(&pid_track_x, spot.cx, 0.02f);
+    float tilt_correction = pid_update(&pid_track_y, spot.cy, 0.02f);
+
+    gimbal_set_pan(pan_correction);
+    gimbal_set_tilt(tilt_correction);
+
+    // 判断追踪成功: 误差 < 3cm (对应角度 ≈ arctan(3/100) ≈ 1.7°)
+    float err_pan  = fabsf(spot.cx) * 57.29578f / SCREEN_DIST;
+    float err_tilt = fabsf(spot.cy) * 57.29578f / SCREEN_DIST;
+    if (err_pan < 1.7f && err_tilt < 1.7f) {
+        // 追踪成功: 连续声光
+        DL_GPIO_setPins(GPIOA, LED_PIN);
+    } else {
+        DL_GPIO_clearPins(GPIOA, LED_PIN);
+    }
+}
+```
+
+### --- 双系统暂停与制动 ---
+
+```c
+// 两个系统独立按键: KEY1(红)暂停, KEY2(绿)暂停
+// 题目要求: 同时按下暂停键, 两个光斑应"立即制动"
+// 因为红/绿系统不通信, "同时按下"靠人工实现
+// 制动: 立即停止 PWM 更新 → 舵机停在原位
+
+volatile bool g_red_paused  = false;
+volatile bool g_green_paused = false;
+
+// 在按键中断中:
+void pause_button_isr(void) {
+    // 关激光 (通过 MOS)
+    LASER_OFF();
+    // 设置暂停标志 → 主循环停止舵机角度更新
+    g_red_paused = true;  // 或 g_green_paused = true
+}
+
+// 一键启动追踪 (发挥部分1):
+// 按下启动键 → green_system_loop 立即执行 detect_red_spot + PID 追踪
+```
+
+### --- 双系统完整初始化 ---
+
+```c
+// 红色系统 main()
+void red_main(void) {
+    SYSCFG_DL_init();
+    __enable_irq();
+    oled_init();
+    generate_square_path();
+    generate_a4_path(5.0f, 8.0f, 0.0f);  // A4贴屏幕右上角
+
+    RedState state = RED_IDLE;
+    uint32_t start_ms = 0;
+    uint32_t path_idx = 0;
+
+    while (1) {
+        // 按键选择模式
+        if (btn_mode_pressed()) {
+            state = (state + 1) % 5;  // 循环切换模式
+            start_ms = g_ms_ticks;
+        }
+        if (btn_pause_pressed()) g_red_paused = !g_red_paused;
+        if (g_red_paused) { LASER_OFF(); continue; }
+        LASER_ON();
+
+        uint32_t elapsed = g_ms_ticks - start_ms;
+        red_system_loop(&state, &path_idx, elapsed);
+        delay_ms(20);
+    }
+}
+
+// 绿色系统 main()
+void green_main(void) {
+    SYSCFG_DL_init();
+    __enable_irq();
+    oled_init();
+    camera_init();  // 初始化 OV7725+FIFO
+
+    GreenState state = GREEN_IDLE;
+    pid_init(&pid_track_x, 0.8f, 0.02f, 0.1f);  // 视觉 X PID
+    pid_init(&pid_track_y, 0.8f, 0.02f, 0.1f);  // 视觉 Y PID
+
+    while (1) {
+        if (btn_track_start_pressed()) {
+            state = GREEN_TRACKING;
+        }
+        if (btn_pause_pressed()) g_green_paused = !g_green_paused;
+        if (g_green_paused) { LASER_OFF(); continue; }
+        LASER_ON();
+
+        green_system_loop(&state);
+        delay_ms(20);
+    }
+}
+```
