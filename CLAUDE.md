@@ -1511,3 +1511,331 @@ void contest_loop(void) {
     // vofa_send_floats(debug, 4);
 }
 ```
+
+---
+
+## 十、2024 年电赛 H 题 — 自动行驶小车
+
+### 赛道几何模型
+
+```
+        100cm (直线段)
+    A ────────────────── B
+   /←─── r=40cm ───→\     ↑
+  │    左半圆弧         │    │ 直线段间距
+  │                    │    │ 2×40=80cm
+   \                  /     ↓
+    D ────────────────── C
+
+场地: 220cm×120cm (含边距)
+轨迹总长一圈: 2×100 + 2×π×40 ≈ 451.3cm
+半圆弧长: ≈125.7cm
+```
+
+**四节点 (弧线顶点/切点)：**
+```
+A: 左上切点  B: 右上切点
+C: 右下切点  D: 左下切点
+```
+
+**要求路径：**
+| 要求 | 路径 | 通过点 | 限时 |
+|------|------|--------|------|
+| (1) | A→B | B停车 | ≤15s |
+| (2) | 顺时针一圈 | A→B→C→D→A | ≤30s |
+| (3) | A→C→B→D→A | 通过所有4点 | ≤40s |
+| (4) | 要求(3)路径×4圈 | 每圈4点 | 越少越好 |
+
+### --- 赛道段定义 ---
+
+```c
+// 赛道段类型
+typedef enum {
+    SEG_STRAIGHT,   // 直线段 (100cm)
+    SEG_LEFT_ARC,   // 左半圆弧 (r=40cm, πr≈125.7cm)
+    SEG_RIGHT_ARC,  // 右半圆弧
+} SegmentType;
+
+typedef struct {
+    SegmentType type;
+    float       length_cm;    // 段长度
+    uint32_t    encoder_ticks;// 编码器脉冲数
+} TrackSegment;
+
+// 4段组成一圈 (从A开始顺时针):
+// S0: A→B 上直线, S1: B→C 右弧, S2: C→D 下直线, S3: D→A 左弧
+static const TrackSegment track_lap[4] = {
+    {SEG_STRAIGHT,  100.0f, 0},  // S0: 上直线, 换算后填充
+    {SEG_RIGHT_ARC, 125.7f, 0},  // S1: 右弧
+    {SEG_STRAIGHT,  100.0f, 0},  // S2: 下直线
+    {SEG_LEFT_ARC,  125.7f, 0},  // S3: 左弧
+};
+
+// 编码器距离换算
+#define ENC_TICKS_PER_CM (ENCODER_PPR / WHEEL_CIRCUMFERENCE)
+
+// 段编码器脉冲数初始化
+void track_segments_init(void) {
+    for (int i = 0; i < 4; i++) {
+        ((TrackSegment*)track_lap)[i].encoder_ticks =
+            (uint32_t)(track_lap[i].length_cm * ENC_TICKS_PER_CM);
+    }
+}
+```
+
+### --- 路线规划 (路径表) ---
+
+```c
+// 路径定义: 按序经过的段号, 段号0~3 对应 S0~S3
+// 要求(1): A→B, 只走 S0
+static const int8_t route_1[] = {0, -1};  // -1 表示终点
+
+// 要求(2): A→B→C→D→A, 顺时针一圈 S0→S1→S2→S3
+static const int8_t route_2[] = {0, 1, 2, 3, -1};
+
+// 要求(3): A→C→B→D→A
+// A→C: 左弧向下 S3 → 下直线向左 S2
+// C→B: 右弧向上 S1 (反向)  → 实际就是 S1 段，但方向相反
+// 注意: 小车只能前进，所以沿赛道反向行驶时是"正常循迹方向"的逆
+// 简化处理: A→C = S3+S2, C→B = S1, B→D = S0+S3, D→A = S3
+// 即: S3→S2→S1→S0→S3→S3 → 合并为两圈中的 6 段
+static const int8_t route_3[] = {3, 2, 1, 0, 3, -1};
+// 说明: A →(S3左弧)→ D →(S2下直线)→ C →(S1右弧)→ B →(S0上直线+B→A→左弧)→ D →(S3左弧)→ A
+
+// 要求(4): 要求(3) 路径 × 4
+static int8_t route_4[24];  // 动态生成: route_3 重复4次
+```
+
+### --- 弯道/直道自适应 PID ---
+
+```c
+// 弯道和直道用不同 PID 参数
+// 弯道线更弯，需要更大的 Kp 来跟踪
+PID_Controller pid_straight;   // 直道转向PID
+PID_Controller pid_curve;      // 弯道转向PID
+
+// 判断当前是在直道还是弯道
+SegmentType current_segment_type(void) {
+    return track_lap[current_seg_idx].type;
+}
+
+float adaptive_steer(float line_err, float dt) {
+    float steer;
+    if (current_segment_type() == SEG_STRAIGHT) {
+        steer = pid_update(&pid_straight, line_err, dt);
+    } else {
+        steer = pid_update(&pid_curve, line_err, dt);
+    }
+    return steer;
+}
+
+// 典型参数:
+// pid_straight: Kp=1.8, Ki=0.08, Kd=0.05
+// pid_curve:    Kp=3.0, Ki=0.15, Kd=0.10
+```
+
+### --- 节点检测 (A/B/C/D 点) ---
+
+```c
+// 检测到达节点: 编码器距离 + 线传感器突变 (弧线→直线过渡处)
+// 弧线-直线交汇处, 5路传感器会有短暂的特殊模式
+
+volatile uint8_t  reached_point = 0;   // 0=无, 1/2/3/4=A/B/C/D的检测标志
+volatile uint32_t point_timestamp = 0; // 到达时刻
+
+void check_point_reached(void) {
+    // 方法1: 编码器距离——当前段剩余距离 < 阈值
+    if (seg_remaining_dist < 3.0f) {  // 距离目标点 < 3cm
+        reached_point = 1;
+        point_timestamp = g_ms_ticks;
+        return;
+    }
+
+    // 方法2: 传感器模式检测——5路全部"看到线"且位置居中
+    // (弧线切点处线比较直，可用于辅助判断)
+    float sum = 0;
+    for (int i = 0; i < TCRT_CHANNELS; i++) sum += tcrt_read_normalized(i);
+    float pos = fabsf(tcrt_get_position());
+    if (sum > 1.5f && pos < 0.15f && seg_remaining_dist < 8.0f) {
+        reached_point = 1;
+        point_timestamp = g_ms_ticks;
+    }
+}
+```
+
+### --- 定点刹车控制 ---
+
+```c
+// S曲线减速: 距离目标点越近, 速度越低
+// 参考公式: v = sqrt(2 * a * d), a 为减速度
+#define MAX_SPEED      0.6f   // 直道巡航速度 (占空比)
+#define MIN_SPEED      0.15f  // 弯道最低速度
+#define DECEL_RATE     0.3f   // 减速度 (m/s^2, 按实际调)
+
+float compute_target_speed(float dist_to_stop, bool is_final_stop) {
+    if (!is_final_stop) {
+        // 途经点: 不减速太多, 流畅通过
+        return (dist_to_stop < 15.0f) ? MAX_SPEED * 0.6f : MAX_SPEED;
+    }
+    // 终点停车: 渐进减速
+    if (dist_to_stop > 40.0f) return MAX_SPEED;
+    if (dist_to_stop < 5.0f)  return 0.0f;   // 刹车
+    // 中间: 线性减速
+    return MAX_SPEED * dist_to_stop / 40.0f;
+}
+
+// 刹车执行
+void brake_now(void) {
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_2);   // AIN1=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_3);   // AIN2=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_4);   // BIN1=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_5);   // BIN2=0
+    pwm_set_duty(0);  // PWM=0
+}
+```
+
+### --- 声光指示 ---
+
+```c
+#define BUZZER_PIN  DL_GPIO_PIN_12  // PA12
+#define LED_PIN     DL_GPIO_PIN_13  // PA13
+
+void indicator_beep(uint8_t times, uint32_t duration_ms) {
+    for (int i = 0; i < times; i++) {
+        DL_GPIO_setPins(GPIOA, BUZZER_PIN | LED_PIN);
+        delay_ms(duration_ms);
+        DL_GPIO_clearPins(GPIOA, BUZZER_PIN | LED_PIN);
+        if (times > 1) delay_ms(150);
+    }
+}
+
+// 到达每个点: 短鸣 1声 + LED 闪 1次
+void point_indicator(void) {
+    indicator_beep(1, 200);
+}
+
+// 最终停车: 长鸣 3声 + LED 长亮 2秒
+void stop_indicator(void) {
+    DL_GPIO_setPins(GPIOA, LED_PIN);
+    indicator_beep(3, 500);
+    DL_GPIO_clearPins(GPIOA, LED_PIN);
+}
+```
+
+### --- 前进锁定 (不得后退) ---
+
+```c
+// TB6612 AIN1/AIN2 控制左电机方向
+// BIN1/BIN2 控制右电机方向
+// 前进: AIN1=1, AIN2=0 / BIN1=1, BIN2=0
+// 后退: AIN1=0, AIN2=1 (本题禁用)
+
+typedef enum {
+    MOTOR_FORWARD = 0,
+    // MOTOR_BACKWARD = 1,  // 本题禁用
+    MOTOR_BRAKE    = 2,
+} MotorDirection;
+
+void motor_set_forward(void) {
+    // 硬件锁定前进方向
+    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_2);    // AIN1=1
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_3);  // AIN2=0
+    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_4);    // BIN1=1
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_5);  // BIN2=0
+}
+
+// 安全封装: 差分驱动只调整占空比, 不动方向
+void safe_differential_drive(float left, float right) {
+    motor_set_forward();  // 始终前进
+    pwm_set_duty((uint32_t)(left  * 4000));  // ch0
+    pwm_set_duty((uint32_t)(right * 4000));  // ch1
+}
+```
+
+### --- H 题主控逻辑 ---
+
+```c
+typedef struct {
+    uint8_t  route_type;    // 1/2/3/4 对应要求(1)~(4)
+    uint8_t  total_points;  // 本路线总途经点
+    uint8_t  point_idx;     // 当前途经点序号
+    uint8_t  lap_count;     // 已完成圈数
+    int8_t   seg_sequence[32]; // 段序列
+    uint8_t  seg_count;     // 段序列长度
+    uint8_t  seg_idx;       // 当前段索引
+    float    seg_progress;  // 当前段已走距离
+    bool     is_finished;
+} H_ContestState;
+
+void h_contest_init(H_ContestState *s, uint8_t route_type) {
+    s->route_type = route_type;
+    s->point_idx  = 0;
+    s->lap_count  = 0;
+    s->seg_idx    = 0;
+    s->seg_progress = 0;
+    s->is_finished  = false;
+
+    // 根据路线类型填充段序列
+    const int8_t (*route)[];
+    switch (route_type) {
+    case 1: route = &route_1; break;
+    case 2: route = &route_2; break;
+    case 3: route = &route_3; break;
+    case 4: // 重复 route_3 × 4
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; route_3[j] >= 0; j++)
+                s->seg_sequence[i*5 + j] = route_3[j];
+        }
+        s->seg_sequence[20] = -1;
+        route = NULL; break;
+    default: return;
+    }
+    if (route) {
+        for (int i = 0; (*route)[i] >= 0; i++)
+            s->seg_sequence[i] = (*route)[i];
+        s->seg_sequence[i] = -1;
+    }
+}
+
+void h_contest_loop(H_ContestState *s) {
+    if (s->is_finished) return;
+
+    // 读编码器
+    int32_t enc_l = encoder_read_left();
+    int32_t enc_r = encoder_read_right();
+    float avg_dist = (enc_l + enc_r) / 2.0f / ENC_TICKS_PER_CM;
+
+    // 更新段进度
+    s->seg_progress += avg_dist;
+    int8_t seg = s->seg_sequence[s->seg_idx];
+    if (seg < 0) { s->is_finished = true; brake_now(); stop_indicator(); return; }
+    float seg_len = track_lap[seg].length_cm;
+
+    // 检测是否到达节点
+    float remaining = seg_len - s->seg_progress;
+    if (remaining < 2.0f) {
+        s->point_idx++;
+        point_indicator();
+        s->seg_progress = 0;
+        s->seg_idx++;
+        // 判断是否是终点
+        if (s->seg_sequence[s->seg_idx] < 0) {
+            s->lap_count++;
+            if (s->route_type == 4 && s->lap_count >= 4) {
+                s->is_finished = true;
+                brake_now();
+                stop_indicator();
+                return;
+            }
+        }
+    }
+
+    // 巡线 + 速度控制
+    float line_err = tcrt_get_position();
+    float steer = adaptive_steer(line_err, 0.001f);
+
+    bool is_final = (s->seg_sequence[s->seg_idx] < 0);
+    float speed = compute_target_speed(remaining, is_final);
+    safe_differential_drive(speed + steer, speed - steer);
+}
+```
