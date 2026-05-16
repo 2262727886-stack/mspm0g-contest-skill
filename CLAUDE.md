@@ -2307,7 +2307,7 @@ pin = Pin(2, Pin.OUT, pull=Pin.PULL_NONE, drive=7)
 pin.value(1); pin.value(0)
 pin.on(); pin.off(); pin.high(); pin.low()
 # drive: 0~15, 默认7, 最大15(除BOOT0/1)
-# ⚠️ 当前固件不支持引脚中断模式！
+# Pin.irq() 自 2025年5月固件起支持; 老固件用 GPIO.irq()(仅GPIOHS引脚)
 
 # 板载RGB灯: 共阳, GPIO62=R, GPIO20=G, GPIO63=B (低电平亮)
 # 板载按键: GPIO53, 按下=高电平, 需配置内部下拉
@@ -2355,6 +2355,21 @@ spi = SPI(0, baudrate=5000000, polarity=0, phase=0, bits=8)
 spi.write(buf); spi.read(nbytes); spi.readinto(buf)
 spi.write_readinto(wbuf, rbuf)  # 全双工
 spi.deinit()
+```
+
+### --- GPIO 中断 (Pin.irq / GPIO.irq) ---
+
+```python
+# 方法1: Pin.irq() — 2025年5月+固件支持
+from machine import Pin
+pin = Pin(53, Pin.IN, Pin.PULL_DOWN)
+pin.irq(handler=lambda p: print("pressed"), trigger=Pin.IRQ_RISING)
+
+# 方法2: GPIO.irq() — 老固件兼容, 仅GPIOHS引脚
+from machine import GPIO
+# GPIOHS 引脚号 0~31 对应可中断引脚(非物理引脚号)
+GPIO.irq(0, GPIO.IRQ_RISING, lambda n: print(f"GPIOHS{n}"), GPIO.WAKEUP_NOT_SUPPORT, 7)
+# TRIGGER: GPIO.IRQ_RISING / IRQ_FALLING / IRQ_BOTH
 ```
 
 ### --- Timer / RTC / Display ---
@@ -2466,10 +2481,12 @@ pl.destroy()
 | 7 | **Sensor** | 说明"同时使用多个传感器时，仅需其中一个执行 run"，但 stop 需每个都调用——容易遗漏 |
 | 8 | **Display** | `bind_layer()` 必须在 `init()` 之前调用，顺序要求容易出错 |
 | 9 | **uctypes** | 位域定义语法 `offset \| type \| lsbit<<BF_POS \| bitsize<<BF_LEN` 极易写错，无误用保护 |
-| 10 | **Pin 中断** | 当前 CanMV 固件**不支持引脚中断模式**，需用轮询替代 |
+| 10 | **Pin 中断** | 老固件(≤2025.4)不支持 Pin.irq()，**2025年5月+固件**已支持。老版本可用 `GPIO.irq()`(仅GPIOHS引脚)替代 |
 | 11 | **ADC 电压** | ADC 仅支持 **1.8V 输入**，超压会烧毁芯片！ADC 仅在 FPC 排线座引出，普通排针无 ADC |
 | 12 | **I2C 上拉** | I2C0/1 板载已有内部上拉电阻，外接 I2C 模块不需再加 |
 | 13 | **FPIOA 必配** | 所有外设使用前必须 `fpioa.set_function()`，否则不工作 |
+| 14 | **固件分支** | `canmv_k230`(RTOS纯MicroPython)是唯一维护分支，旧 `k230_canmv`(Linux+RTOS双系统)已停止维护 |
+| 15 | **UART 中断** | UART 等外设硬件中断未暴露给 MicroPython，仅 GPIO 中断可用 |
 
 ---
 
