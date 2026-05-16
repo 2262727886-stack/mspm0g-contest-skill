@@ -2274,29 +2274,54 @@ ucryptolib.sm4(key, mode, IV)          # SM4-ECB/CBC
 cipher.encrypt(pt); cipher.decrypt(ct)
 ```
 
+### --- FPIOA (引脚复用) ---
+
+```python
+# ⚠️ K230 所有外设需先通过 FPIOA 配置引脚功能，再使用！
+from machine import FPIOA
+fpioa = FPIOA()
+# 将 GPIO11 配置为 UART2_TXD
+fpioa.set_function(11, FPIOA.UART2_TXD)
+# 将 GPIO12 配置为 UART2_RXD
+fpioa.set_function(12, FPIOA.UART2_RXD)
+# 查询引脚当前功能
+fpioa.get_pin_func(11)
+# 查询功能当前所在引脚
+fpioa.get_pin_num(FPIOA.UART2_TXD)
+# 打印所有引脚配置信息
+fpioa.help()
+# 每个引脚同一时刻只能激活一种功能
+```
+
 ### --- GPIO / ADC / PWM ---
 
 ```python
-from machine import Pin, ADC, PWM
+from machine import Pin, ADC, PWM, FPIOA
 
-# GPIO: 64 个引脚 [0~63]
+fpioa = FPIOA()
+# 先配置FPIOA，再使用GPIO
+fpioa.set_function(pin_number, FPIOA.GPIOx)
+
+# GPIO: 64 个引脚 [0~63], 3.3V电平
 pin = Pin(2, Pin.OUT, pull=Pin.PULL_NONE, drive=7)
 pin.value(1); pin.value(0)
 pin.on(); pin.off(); pin.high(); pin.low()
-pin.mode(); pin.pull(); pin.drive()
-pin.init(Pin.IN, pull=Pin.PULL_UP, drive=7)
+# drive: 0~15, 默认7, 最大15(除BOOT0/1)
+# ⚠️ 当前固件不支持引脚中断模式！
 
-# ADC: 6 通道 [0~5], 12bit, 1MHz, 0~1.8V
+# 板载RGB灯: 共阳, GPIO62=R, GPIO20=G, GPIO63=B (低电平亮)
+# 板载按键: GPIO53, 按下=高电平, 需配置内部下拉
+
+# ⚠️ ADC: 仅 FPC 排线座引出, 4通道, 最高 1.8V 输入!
+# 普通排针上无 ADC 功能, 超1.8V会烧毁芯片
 adc = ADC(0)
 adc.read_u16()     # 0~4095
 adc.read_uv()      # 0~1800000 uV
 
 # PWM: 6 通道 [0~5], ch0-2 同频率, ch3-5 同频率
 pwm = PWM(0, freq=1000, duty=50, enable=True)
-pwm.freq(2000)     # 改频率 (Hz)
-pwm.duty(30)       # 改占空比 0~100 (%)
-pwm.enable(True/False)
-pwm.deinit()
+pwm.freq(2000); pwm.duty(30)
+pwm.enable(True/False); pwm.deinit()
 ```
 
 ### --- UART / I2C / SPI ---
@@ -2304,12 +2329,14 @@ pwm.deinit()
 ```python
 from machine import UART, I2C, I2C_Slave, SPI
 
-# UART: UART1/UART2/UART4 可用 (UART0/3 被系统占用)
-u = UART(UART.UART1, baudrate=115200, bits=UART.EIGHTBITS,
+# UART: UART2(GPIO11=TXD,GPIO12=RXD) 和 UART3(GPIO50=TXD,GPIO51=RXD) 可用
+# UART0(GPIO38/39) 被大核RT-Smart占用, UART1不可用
+u = UART(UART.UART2, baudrate=115200, bits=UART.EIGHTBITS,
          parity=UART.PARITY_NONE, stop=UART.STOPBITS_ONE)
 u.write(buf); u.read([n]); u.readline(); u.readinto(buf)
 
-# I2C 主机: 硬件 0~4, 软件 5~9
+# I2C: I2C0(GPIO48=SCL,GPIO49=SDA) I2C1(GPIO40=SCL,GPIO41=SDA)
+# ⚠️ 庐山派板载I2C已有内部上拉电阻, 外设不用再加
 i2c = I2C(0, freq=100000)
 i2c.scan()                      # → [addr, ...]
 i2c.readfrom(addr, len, True)   # → bytes
@@ -2439,6 +2466,10 @@ pl.destroy()
 | 7 | **Sensor** | 说明"同时使用多个传感器时，仅需其中一个执行 run"，但 stop 需每个都调用——容易遗漏 |
 | 8 | **Display** | `bind_layer()` 必须在 `init()` 之前调用，顺序要求容易出错 |
 | 9 | **uctypes** | 位域定义语法 `offset \| type \| lsbit<<BF_POS \| bitsize<<BF_LEN` 极易写错，无误用保护 |
+| 10 | **Pin 中断** | 当前 CanMV 固件**不支持引脚中断模式**，需用轮询替代 |
+| 11 | **ADC 电压** | ADC 仅支持 **1.8V 输入**，超压会烧毁芯片！ADC 仅在 FPC 排线座引出，普通排针无 ADC |
+| 12 | **I2C 上拉** | I2C0/1 板载已有内部上拉电阻，外接 I2C 模块不需再加 |
+| 13 | **FPIOA 必配** | 所有外设使用前必须 `fpioa.set_function()`，否则不工作 |
 
 ---
 
@@ -2459,6 +2490,22 @@ pl.destroy()
 │  接收坐标 → PID 控制 → 电机/舵机执行                   │
 │  功耗: 0.1W, 独立电池                                 │
 └──────────────────────────────────────────────────────┘
+```
+
+**双芯硬件连接：**
+| K230 (庐山派) | MSPM0G (天猛星) | 说明 |
+|---------------|-----------------|------|
+| GPIO11 (UART2_TXD) | PA10 (UART0_RX) | 视觉→控制 数据 |
+| GPIO12 (UART2_RXD) | PA11 (UART0_TX) | 可选ACK回传 |
+| GND | GND | 必须共地 |
+| 独立电池 5V | 独立电池 7.4V | 供电隔离 |
+
+**⚠️ K230 启动前必须配置 FPIOA：**
+```python
+fpioa = FPIOA()
+fpioa.set_function(11, FPIOA.UART2_TXD)
+fpioa.set_function(12, FPIOA.UART2_RXD)
+# 之后才能 uart = UART(UART.UART2, ...)
 ```
 
 ### K230 视觉竞赛速查
