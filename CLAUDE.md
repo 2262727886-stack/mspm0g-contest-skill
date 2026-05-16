@@ -2234,3 +2234,209 @@ void green_main(void) {
     }
 }
 ```
+
+---
+
+## 十二、立创庐山派 K230 CanMV API 速查
+
+K230 是嘉楠科技 RISC-V AI 芯片，CanMV 是其 MicroPython 移植。仅软定时器可用，硬件 Timer 0-5 暂不可用。
+
+### --- system ---
+
+```python
+import machine, gc, uos, time, utime, uhashlib, ucryptolib
+
+machine.reset()          # SoC 复位
+machine.temperature()    # 芯片温度 (float)
+machine.chipid()         # 芯片 ID → bytearray(32)
+machine.mem_copy(dst, src, size)
+
+gc.enable(); gc.disable(); gc.collect()
+gc.mem_alloc()                      # 已分配堆内存 (byte)
+gc.mem_free()                        # 可用堆内存 (byte)
+gc.sys_total()                       # 系统总内存
+gc.sys_heap() / sys_page() / sys_mmz()  # 返回 (total, free, used) 元组
+
+utime.sleep(seconds); utime.sleep_ms(ms); utime.sleep_us(us)
+utime.ticks_ms(); utime.ticks_us(); utime.ticks_diff(t1, t2)
+c = utime.clock()         # 创建时钟对象
+c.tick()                  # 记录当前时间
+c.fps()                   # 返回帧率
+c.reset(); c.avg()        # 重置 / 平均耗时
+
+uhashlib.sha256([data])   # 硬件加速 SHA256
+obj.update(data)          # 追加数据
+obj.digest()              # 获取哈希 → bytes (只能调用一次！)
+# hexdigest 未实现，用 binascii.hexlify(hash.digest()) 代替
+
+ucryptolib.aes(key, mode=0, IV, AAD)   # AES-GCM 硬件加速
+ucryptolib.sm4(key, mode, IV)          # SM4-ECB/CBC
+cipher.encrypt(pt); cipher.decrypt(ct)
+```
+
+### --- GPIO / ADC / PWM ---
+
+```python
+from machine import Pin, ADC, PWM
+
+# GPIO: 64 个引脚 [0~63]
+pin = Pin(2, Pin.OUT, pull=Pin.PULL_NONE, drive=7)
+pin.value(1); pin.value(0)
+pin.on(); pin.off(); pin.high(); pin.low()
+pin.mode(); pin.pull(); pin.drive()
+pin.init(Pin.IN, pull=Pin.PULL_UP, drive=7)
+
+# ADC: 6 通道 [0~5], 12bit, 1MHz, 0~1.8V
+adc = ADC(0)
+adc.read_u16()     # 0~4095
+adc.read_uv()      # 0~1800000 uV
+
+# PWM: 6 通道 [0~5], ch0-2 同频率, ch3-5 同频率
+pwm = PWM(0, freq=1000, duty=50, enable=True)
+pwm.freq(2000)     # 改频率 (Hz)
+pwm.duty(30)       # 改占空比 0~100 (%)
+pwm.enable(True/False)
+pwm.deinit()
+```
+
+### --- UART / I2C / SPI ---
+
+```python
+from machine import UART, I2C, I2C_Slave, SPI
+
+# UART: UART1/UART2/UART4 可用 (UART0/3 被系统占用)
+u = UART(UART.UART1, baudrate=115200, bits=UART.EIGHTBITS,
+         parity=UART.PARITY_NONE, stop=UART.STOPBITS_ONE)
+u.write(buf); u.read([n]); u.readline(); u.readinto(buf)
+
+# I2C 主机: 硬件 0~4, 软件 5~9
+i2c = I2C(0, freq=100000)
+i2c.scan()                      # → [addr, ...]
+i2c.readfrom(addr, len, True)   # → bytes
+i2c.writeto(addr, buf, True)    # → 发送字节数
+i2c.readfrom_mem(addr, memaddr, nbytes, mem_size=8)
+i2c.writeto_mem(addr, memaddr, buf, mem_size=8)
+i2c.deinit()
+
+# I2C 从机 (需编译时开启)
+i2c_s = I2C_Slave(I2C_Slave.list()[0], addr=0x10, mem_size=20)
+i2c_s.readfrom_mem(0, n)        # 读主设备写入的数据
+i2c_s.writeto_mem(0, data)      # 写数据供主设备读取
+
+# SPI: 3 个模块 [0~2]
+spi = SPI(0, baudrate=5000000, polarity=0, phase=0, bits=8)
+spi.write(buf); spi.read(nbytes); spi.readinto(buf)
+spi.write_readinto(wbuf, rbuf)  # 全双工
+spi.deinit()
+```
+
+### --- Timer / RTC / Display ---
+
+```python
+from machine import Timer, RTC
+
+# ⚠️ 硬件 Timer [0-5] 暂不可用，只用软件定时器
+tim = Timer(-1)  # -1 = 软件定时器
+tim.init(period=100, mode=Timer.ONE_SHOT, callback=lambda t: print(1))
+tim.init(period=1000, mode=Timer.PERIODIC, callback=lambda t: print(2))
+tim.deinit()
+
+rtc = RTC()
+rtc.init((2024, 2, 28, 2, 23, 59, 0, 0))
+rtc.datetime()  # → (year, mon, day, wday, hour, min, sec, microsec)
+
+# LCD (SPI 接口)
+from machine import SPI_LCD
+lcd = SPI_LCD(spi, pin_dc, pin_cs, pin_rst, bl=pin_bl, type=SPI_LCD.ST7789)
+lcd.configure(320, 240, hmirror=False, vflip=True, bgr=False)
+img = lcd.init()               # → Image 对象 (显存)
+img.clear()
+img.draw_string_advanced(0, 0, 32, "你好", color=(255, 0, 0))
+lcd.show()                     # 刷新到屏幕
+lcd.fill(color); lcd.pixel(x, y, color)
+lcd.light(50)                  # 背光 0~100
+```
+
+### --- Sensor (摄像头) ---
+
+```python
+from media.sensor import Sensor
+
+sensor = Sensor(id=0, width=1280, height=720, fps=60)
+sensor.reset()
+sensor.set_pixformat(sensor.RGB888, chn=CAM_CHN_ID_0)
+sensor.set_framesize(chn=CAM_CHN_ID_0, width=640, height=480)
+sensor.set_hmirror(True)
+sensor.set_vflip(False)
+sensor.run()                   # 必须在 MediaManager.init() 之前
+img = sensor.snapshot(chn=CAM_CHN_ID_0)  # 捕获一帧 → Image
+sensor.stop()
+
+# 支持传感器: OV5647(2592×1944@10fps), GC2093(1920×1080@60fps), IMX335
+# 像素格式: RGB565, RGB888, YUV420SP, GRAYSCALE
+```
+
+### --- Display ---
+
+```python
+from media.display import Display
+
+# 支持的屏幕: ST7701(800×480), LT9611 HDMI(1920×1080), HX8377(1080×1920), VIRT(IDE调试)
+Display.init(Display.ST7701, width=800, height=480, to_ide=True)
+Display.show_image(img, x=0, y=0, layer=LAYER_OSD0)
+Display.bind_layer(src=sensor.bind_info(), dstlayer=LAYER_VIDEO1)
+Display.deinit()
+```
+
+### --- YOLO 推理 ---
+
+```python
+from libs.YOLO import YOLOv5, YOLOv8, YOLO11
+
+# task_type: "classify"/"detect"/"segment"
+# mode: "image" 或 "video"
+yolo = YOLOv5(task_type="detect", mode="image",
+    kmodel_path="/data/kmodel.kmodel",
+    labels=["apple","banana","orange"],
+    rgb888p_size=[1280,720],
+    model_input_size=[320,320],
+    conf_thresh=0.5, nms_thresh=0.45,
+    max_boxes_num=50, debug_mode=0)
+
+yolo.config_preprocess()
+res = yolo.run(img_numpy)       # HWC→CHW 格式, ulab.numpy.ndarray
+yolo.draw_result(res, img_ori)  # 绘制结果到 Image
+yolo.deinit()
+# YOLOv8/YOLO11 接口相同，仅类名不同
+```
+
+### --- PipeLine (视频流) ---
+
+```python
+from libs.PipeLine import PipeLine, ScopedTiming
+
+pl = PipeLine(rgb888p_size=[1280,720], display_size=[1920,1080], display_mode="hdmi")
+pl.create()
+while True:
+    img = pl.get_frame()       # 从 sensor 取一帧
+    # ... 推理 ...
+    pl.show_image()            # 显示结果
+pl.destroy()
+```
+
+---
+
+## 十三、K230 API 已知问题
+
+| # | 模块 | 问题 |
+|---|------|------|
+| 1 | **gc** | 概述 `sys_totoal` 拼写错误 → 应为 `sys_total` |
+| 2 | **hashlib** | 返回值文档错误——`sha256()/digest()/update()` 返回值表格写"0成功/非0失败"，实际 `sha256()` 返回对象、`digest()` 返回 bytes、`update()` 返回 None |
+| 3 | **ucryptolib** | SM4 的 `mode` 参数未映射——文档只说支持 ECB/CBC，但未说明 `mode=0` 是 ECB 还是 CBC（示例中 `mode=1` 是 CBC） |
+| 4 | **Timer** | **硬件定时器 [0-5] 暂不可用**，仅 `Timer(-1)` 软件定时器可用。多路定时需求需自行用 `ticks_ms` 实现 |
+| 5 | **I2C Slave** | `I2C_Slave.list()` 返回设备 ID 列表，但 ID 含义未说明。需从示例代码反推用法 |
+| 6 | **hashlib** | `hexdigest()` 方法未实现，需用 `binascii.hexlify(hash.digest())` 替代 |
+| 7 | **Sensor** | 说明"同时使用多个传感器时，仅需其中一个执行 run"，但 stop 需每个都调用——容易遗漏 |
+| 8 | **Display** | `bind_layer()` 必须在 `init()` 之前调用，顺序要求容易出错 |
+| 9 | **uctypes** | 位域定义语法 `offset \| type \| lsbit<<BF_POS \| bitsize<<BF_LEN` 极易写错，无误用保护 |
+
