@@ -10,6 +10,49 @@ description: MSPM0G电赛开发助手
 
 ---
 
+## ⚠️ 强制开发规范（最高优先级，不可违反）
+
+### 1. 资料边界
+- 后续所有代码生成、解答、引脚分配**只能基于本文档提供的资料**
+- **禁止编造幻觉**：不存在的外设、不存在的引脚、不存在的 API 一律不得出现
+- **禁止引用外部不知名手册**：不得引用非 TI 官方或本文档未收录的任何数据手册、SDK 文档
+
+### 2. 引脚配置铁律
+- **禁用引脚必须明确写死**：每次涉及 GPIO/外设分配时，必须先排除以下引脚：
+
+| 禁用引脚 | 原因 | 备注 |
+|----------|------|------|
+| **PA0, PA1** | 板载 CH340 固定占用 (UART0 TX/RX) | 不可改，不可复用 |
+| **PA2~PA6** | 时钟引脚 (ROSC/LFXIN/HFXIN) | 默认未焊接，**绝对勿用** |
+| **PA19** | SWDIO 调试数据 | 保留调试接口 |
+| **PA20** | SWCLK 调试时钟 | 保留调试接口 |
+
+- **所有外设引脚必须做成表格**：每次分配引脚时，必须输出如下格式的完整表格，缺一不可：
+
+| 外设功能 | 芯片/模块型号 | 天猛星引脚 | IOMUX索引 | 片上复用功能 | 备注 |
+|----------|--------------|-----------|-----------|-------------|------|
+| xxx | xxx | PAxx | PINCMxx | UART0_TX / GPIO | xxx |
+
+- **禁止模糊输入**：不得出现"用某个引脚""随便接一个 GPIO"等模糊表述
+- **禁止纯纯复用源代码**：不能直接粘贴 CLAUDE.md 中的代码模板而不根据实际需求调整
+
+### 3. 代码质量
+- **所有代码必须带完整注释**：每个函数、每个关键变量、每段算法逻辑必须有中文注释说明 WHY
+- **模块化结构**：按功能拆分为独立 .h/.c 文件，通过 `#include` 内联编译
+- **所有芯片和硬件必须明确型号**：MCU=MSPM0G3507、电机驱动=TB6612FNG、电机=MG310、IMU=MPU6050、OLED=SSD1306(0.96" I2C)、激光=405nm蓝紫≤10mW、舵机=SG90/MG996R 等，不得含糊
+
+### 4. API 安全
+- 使用 SDK API 前必须确认该函数在当前版本 `mspm0_sdk_2_10_00_04` 的 `dl_xxx.h` 中**真实存在**
+- **已知不可用的 API（黑名单）**：
+  - `DL_GPIO_setDirection()` — 不存在，使用 `DL_GPIO_initDigitalOutput/Input(PINCMxx)`
+  - `DL_GPIO_setInternalResistor()` — 不存在，使用 `DL_GPIO_setDigitalInternalResistor(PINCMxx, ...)`
+  - `DL_ADC12_readMemResult()` — 不存在，使用 `DL_ADC12_getMemResult()`
+  - `DL_I2C_transmitBlocking()` / `DL_I2C_receiveBlocking()` — 不存在，使用 `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()`
+  - `DL_TimerG_getCounterValue()` — 不存在，使用 `DL_TimerG_getTimerCount()`
+- **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0, TIMA1 — **不存在 TIMG1~5**
+
+---
+
 ## 一、MCU 速查 — MSPM0G3507
 
 ### 核心参数
