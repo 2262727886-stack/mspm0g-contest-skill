@@ -1,7 +1,8 @@
 ---
 name: mspm0g-contest
-description: MSPM0G电赛开发助手 — 初始化代码生成、控制算法实现、外设驱动、硬件连接建议
+description: MSPM0G电赛开发助手
 ---
+
 
 # MSPM0G 电赛开发助手
 
@@ -1157,3 +1158,361 @@ void button_update(Button *btn, bool pressed) {
 - I2C 必须加上拉电阻 (4.7kΩ to 3.3V)
 - 电机编码器线长尽量短，必要时加屏蔽
 - 用户即将提供数据手册 PDF，届时可根据精确参数更新代码
+
+---
+
+## 九、2025 年电赛 E 题 — 简易自行瞄准装置
+
+### 系统架构
+
+```
+                    ┌─────────────┐
+        TCRT5000×5  │   MSPM0G    │
+        循迹阵列 ───→│   (巡迹+PID) │──→ TB6612 → 电机A(左)
+                    │             │──→ TB6612 → 电机B(右)
+    EC11编码器×2 ──→│             │
+                    │             │──→ 舵机1 (Pan/水平)
+        按键/OLED ──┤             │──→ 舵机2 (Tilt/俯仰)
+                    └─────────────┘
+                           │
+                    蓝紫激光笔 (接继电器/MOS)
+```
+
+**场地坐标系 (cm)：**
+```
+A(0,0) ────────── B(100,0)
+  │                  │
+  │   行驶轨迹(黑线)   │
+  │   逆时针方向       │
+  │                  │
+D(0,100) ──────── C(100,100)
+
+靶面中心: (50, -50)，靶面与AB平行，竖立
+靶面高度: ≤50cm
+```
+
+### --- TCRT5000 五路循迹 ---
+
+```c
+// 5路红外传感器接 ADC0 通道 0~4
+#define TCRT_CHANNELS 5
+static uint16_t tcrt_min[TCRT_CHANNELS];  // 白底校准值
+static uint16_t tcrt_max[TCRT_CHANNELS];  // 黑线校准值
+
+// 上电自动校准: 小车在白底上放3秒，再在黑线上放3秒
+void tcrt_calibrate_white(void) {
+    for (int ch = 0; ch < TCRT_CHANNELS; ch++) {
+        tcrt_min[ch] = 4095;  // 初始最大化
+    }
+    for (int i = 0; i < 200; i++) {
+        for (int ch = 0; ch < TCRT_CHANNELS; ch++) {
+            uint16_t val = adc_read_channel(ch);
+            if (val < tcrt_min[ch]) tcrt_min[ch] = val;
+        }
+        delay_ms(10);
+    }
+}
+
+void tcrt_calibrate_black(void) {
+    for (int ch = 0; ch < TCRT_CHANNELS; ch++) {
+        tcrt_max[ch] = 0;
+    }
+    for (int i = 0; i < 200; i++) {
+        for (int ch = 0; ch < TCRT_CHANNELS; ch++) {
+            uint16_t val = adc_read_channel(ch);
+            if (val > tcrt_max[ch]) tcrt_max[ch] = val;
+        }
+        delay_ms(10);
+    }
+}
+
+// 归一化: 0.0(全白) ~ 1.0(全黑)
+float tcrt_read_normalized(uint8_t ch) {
+    uint16_t val = adc_read_channel(ch);
+    float norm = (float)(val - tcrt_min[ch]) / (tcrt_max[ch] - tcrt_min[ch] + 1);
+    if (norm < 0) norm = 0;
+    if (norm > 1.0f) norm = 1.0f;
+    return norm;
+}
+
+// 加权位置计算: 返回-1.0(最左) ~ +1.0(最右), 0为居中
+float tcrt_get_position(void) {
+    float sum_val = 0, sum_weight = 0;
+    float sensor_positions[5] = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
+    for (int i = 0; i < TCRT_CHANNELS; i++) {
+        float v = tcrt_read_normalized(i);
+        // 阈值过滤噪声
+        if (v > 0.1f) {
+            sum_val += v * sensor_positions[i];
+            sum_weight += v;
+        }
+    }
+    if (sum_weight < 0.05f) return 0.0f;  // 全部白，保持直行
+    return sum_val / sum_weight;
+}
+
+// 判断是否完全离线 (5路全白 = 冲出赛道)
+bool tcrt_is_lost(void) {
+    float sum = 0;
+    for (int i = 0; i < TCRT_CHANNELS; i++) sum += tcrt_read_normalized(i);
+    return sum < 0.1f;
+}
+```
+
+### --- 巡线转向 PID ---
+
+```c
+// 转向 PID: 输入为线位置误差(-1~+1), 输出为差速修正(-1~+1)
+PID_Controller steer_pid;
+
+// 差分驱动: base_speed 基础速度, steer_output 转向修正(-1~+1)
+void differential_drive(float base_speed, float steer_output) {
+    float left_speed  = base_speed * (1.0f - steer_output);
+    float right_speed = base_speed * (1.0f + steer_output);
+
+    // 限幅
+    if (left_speed  < 0) left_speed  = 0;
+    if (right_speed < 0) right_speed = 0;
+    if (left_speed  > 1.0f) left_speed  = 1.0f;
+    if (right_speed > 1.0f) right_speed = 1.0f;
+
+    // 写入 PWM 占空比
+    uint32_t period = 4000; // 20kHz
+    pwm_set_duty(left_speed * period);   // TIMG0 ch0 → 左电机
+    pwm_set_duty(right_speed * period);  // TIMG0 ch1 → 右电机
+}
+
+// 主控循环 (放在 1kHz 定时中断或主循环中)
+float line_err = tcrt_get_position();
+float steer = pid_update(&steer_pid, line_err, 0.001f); // dt=1ms
+differential_drive(0.5f, steer);  // 50% 基础速度
+```
+
+### --- 圈数检测 ---
+
+```c
+// 基于十字路口的圈数检测: 行驶轨迹是正方形，连续检测到4段直线+4个直角转弯
+// 简化方案: 用编码器距离 + 方向判断
+volatile uint8_t lap_count = 0;
+volatile uint8_t segment = 0;     // 0=AB, 1=BC, 2=CD, 3=DA
+volatile float   segment_dist = 0; // 当前段已行驶距离
+
+// 编码器累计: 在定时中断中每1ms累加
+// 车轮周长 = π×直径, 编码器线数 = 脉冲数/圈
+#define WHEEL_CIRCUMFERENCE 20.42f  // π×6.5cm
+#define ENCODER_PPR         390     // 电机编码器脉冲数/圈(含减速比)
+
+void lap_detector_update(int32_t enc_left, int32_t enc_right, float dt) {
+    // 左右轮平均距离
+    float avg_pulses = (enc_left + enc_right) / 2.0f;
+    float distance_cm = avg_pulses / ENCODER_PPR * WHEEL_CIRCUMFERENCE;
+    segment_dist += fabsf(distance_cm);
+
+    // 每100cm切换段
+    if (segment_dist >= 100.0f) {
+        segment_dist -= 100.0f;
+        segment = (segment + 1) % 4;
+        if (segment == 0) lap_count++;
+    }
+}
+```
+
+### --- 二维云台舵机控制 ---
+
+```c
+// 双舵机: Pan(水平旋转), Tilt(俯仰)
+// 使用 TIMG0 ch2(Pan), ch3(Tilt) 或独立 TIMG
+#define PAN_CHANNEL   2
+#define TILT_CHANNEL  3
+
+// 舵机角度转 PWM 脉宽
+uint32_t servo_angle_to_pulse(float angle_deg, float min_deg, float max_deg) {
+    float ratio = (angle_deg - min_deg) / (max_deg - min_deg);
+    if (ratio < 0) ratio = 0; if (ratio > 1.0f) ratio = 1.0f;
+    return (uint32_t)(SERVO_MIN + (SERVO_MAX - SERVO_MIN) * ratio);
+}
+
+void gimbal_set_pan(float angle_deg) {
+    uint32_t pulse = servo_angle_to_pulse(angle_deg, -90.0f, 90.0f);
+    DL_TimerG_setCaptureCompareValue(TIMG0, PAN_CHANNEL, pulse);
+}
+
+void gimbal_set_tilt(float angle_deg) {
+    uint32_t pulse = servo_angle_to_pulse(angle_deg, 0.0f, 60.0f);
+    DL_TimerG_setCaptureCompareValue(TIMG0, TILT_CHANNEL, pulse);
+}
+
+// 激光笔开关 (通过 GPIO + MOS/继电器)
+#define LASER_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_9)
+#define LASER_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_9)
+```
+
+### --- 瞄准几何解算 ---
+
+```c
+// 场地坐标系 (cm): A(0,0), B(100,0), C(100,100), D(0,100)
+// 靶心坐标 (cm): (50, -50)
+#define TARGET_X  50.0f
+#define TARGET_Y -50.0f
+#define TARGET_Z  25.0f  // 靶心高度(cm), 实测校准
+#define GIMBAL_Z   8.0f  // 云台离地高度(cm)
+
+// 根据小车位置计算 Pan 角度 (绕Z轴旋转)
+float compute_pan_angle(float car_x, float car_y, float car_heading) {
+    // car_heading: 小车朝向角度(°), 逆时针, 0=AB方向(右), 90=BC方向(上)
+    float dx = TARGET_X - car_x;
+    float dy = TARGET_Y - car_y;
+    // 目标相对于小车的世界坐标系方位角
+    float world_azimuth = atan2f(dy, dx) * 57.29578f;  // 转度
+    // Pan 云台在小车坐标中的角度 (相对于车头)
+    float pan = world_azimuth - car_heading;
+    // 归一化到 ±180°
+    while (pan > 180) pan -= 360;
+    while (pan < -180) pan += 360;
+    return pan;
+}
+
+// 计算 Tilt 俯仰角度
+float compute_tilt_angle(float car_x, float car_y) {
+    float dx = TARGET_X - car_x;
+    float dy = TARGET_Y - car_y;
+    float horizontal_dist = sqrtf(dx*dx + dy*dy);
+    float dz = TARGET_Z - GIMBAL_Z;
+    return atan2f(dz, horizontal_dist) * 57.29578f;
+}
+
+// 计算小车在正方形轨迹上的实时位置 (简化: 基于累计距离推算)
+void compute_car_position(float total_distance_cm,
+                          float *x, float *y, float *heading) {
+    float d = fmodf(total_distance_cm, 400.0f);  // 单圈400cm
+    if (d < 100) {           // AB段: (d, 0), 方向 0°
+        *x = d; *y = 0; *heading = 0;
+    } else if (d < 200) {   // BC段: (100, d-100), 方向 90°
+        *x = 100; *y = d - 100; *heading = 90;
+    } else if (d < 300) {   // CD段: (300-d, 100), 方向 180°
+        *x = 300 - d; *y = 100; *heading = 180;
+    } else {                // DA段: (0, 400-d), 方向 270°
+        *x = 0; *y = 400 - d; *heading = 270;
+    }
+}
+```
+
+### --- 同步画圆算法 (发挥部分3) ---
+
+```c
+// 需求: 小车行驶1圈期间, 激光沿靶面上半径6cm的红色圆弧同步画1圈
+// 同步误差 < 1/4圈
+
+// 靶面坐标系: X→(水平,平行AB), Z→(垂直,靶面高度)
+// 靶心在靶面上的坐标: (0, 0)  (即靶面中心)
+// 画圆半径: 6cm
+
+float sync_draw_circle_phase(float car_total_distance_cm) {
+    // 小车行驶距离 → 0~2π 相位
+    return fmodf(car_total_distance_cm, 400.0f) / 400.0f * 6.2831853f;
+}
+
+// 计算激光在靶面上的目标点 (靶面坐标系, cm)
+void get_laser_target_on_target(float phase, float radius,
+                                float *tx, float *tz) {
+    *tx = radius * cosf(phase);   // 水平偏移
+    *tz = radius * sinf(phase);   // 垂直偏移
+}
+
+// 将靶面坐标转换为云台角度
+void target_to_gimbal(float target_x, float target_z,
+                      float car_x, float car_y,
+                      float *pan, float *tilt) {
+    // 靶面点在空间中的实际坐标
+    float world_x = TARGET_X + target_x;  // 靶面水平
+    float world_z = TARGET_Z + target_z;  // 靶面垂直
+    float world_y = TARGET_Y;
+
+    float dx = world_x - car_x;
+    float dy = world_y - car_y;
+    *pan  = atan2f(dy, dx) * 57.29578f;
+    float h_dist = sqrtf(dx*dx + dy*dy);
+    *tilt = atan2f(world_z - GIMBAL_Z, h_dist) * 57.29578f;
+}
+```
+
+### --- 参数设置界面 (OLED + EC11) ---
+
+```c
+// 可调参数
+typedef struct {
+    uint8_t  laps;        // 圈数 1~5
+    float    base_speed;  // 基础速度 0.2~1.0
+    float    pid_kp;      // 转向 Kp
+    float    pid_ki;      // 转向 Ki
+    float    pid_kd;      // 转向 Kd
+    bool     laser_mode;  // 连续发光/瞄准
+} ContestParams;
+
+static ContestParams params = {1, 0.5f, 2.0f, 0.1f, 0.05f, true};
+
+// EC11 旋转选择菜单
+void menu_edit_params(void) {
+    oled_clear();
+    oled_puts(0, 0, ">> Laps Speed Kp Ki Kd");
+    // EC11 旋钮选参数, 按键切换, 长按确认
+    // 每次修改后 oled_show_float() 刷新显示
+    oled_refresh();
+}
+```
+
+### --- 完整控制流程 (发挥部分) ---
+
+```c
+// 状态机
+typedef enum {
+    STATE_IDLE,              // 等待启动
+    STATE_AUTO_TRACK,        // 自动巡线 (基本要求1)
+    STATE_AIM_STATIC,        // 静止瞄准 (基本要求2)
+    STATE_AIM_MOVING,        // 移动瞄准 (基本要求3)
+    STATE_COMBINED,          // 巡线+连续瞄准 (发挥部分)
+    STATE_COMPLETE,          // 完成
+} SystemState;
+
+// 主循环控制 (简化)
+void contest_loop(void) {
+    static float total_dist = 0;
+    static float lap_start_dist = 0;
+    static uint32_t start_time = 0;
+
+    // 读取编码器
+    int32_t enc_l = encoder_read_left();
+    int32_t enc_r = encoder_read_right();
+
+    // 巡线
+    float line_err = tcrt_get_position();
+    float steer = pid_update(&steer_pid, line_err, 0.001f);
+
+    // 圈数检测
+    lap_detector_update(enc_l, enc_r, 0.001f);
+    total_dist += (enc_l + enc_r) / 2.0f / ENCODER_PPR * WHEEL_CIRCUMFERENCE;
+
+    // 瞄准解算
+    float cx, cy, heading;
+    compute_car_position(total_dist, &cx, &cy, &heading);
+    float pan  = compute_pan_angle(cx, cy, heading);
+    float tilt = compute_tilt_angle(cx, cy);
+
+    // 画圆模式 (发挥3): 叠加圆偏移
+    if (params.laser_mode && params.laps > 0) {
+        float phase = sync_draw_circle_phase(total_dist);
+        float tx, tz;
+        get_laser_target_on_target(phase, 6.0f, &tx, &tz);
+        target_to_gimbal(tx, tz, cx, cy, &pan, &tilt);
+    }
+
+    // 执行
+    gimbal_set_pan(pan);
+    gimbal_set_tilt(tilt);
+    differential_drive(params.base_speed, steer);
+
+    // UART 调试输出
+    // float debug[4] = {line_err, steer, pan, tilt};
+    // vofa_send_floats(debug, 4);
+}
+```
