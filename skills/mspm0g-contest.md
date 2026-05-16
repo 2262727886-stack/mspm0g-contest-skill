@@ -83,7 +83,7 @@ description: MSPM0G电赛开发助手
 // PA8 = Pan, PA9 = Tilt
 
 // EC11 旋转编码器
-// PA16 = A相, PA17 = B相, PA14 = 按键
+// PB2 = A相, PB3 = B相, PB4 = 按键
 
 // 激光笔 / 蜂鸣器
 // PA10 = 激光MOS, PA11 = 蜂鸣器
@@ -582,7 +582,8 @@ void oled_show_float(uint8_t x, uint8_t y, const char *label, float val) {
 
 ```c
 // 4×4 矩阵按键 (4 行输出 + 4 列输入)
-// 行: PA0~PA3 (输出), 列: PA4~PA7 (输入, 内部下拉)
+// 行: PB8~PB11 (输出), 列: PB12~PB15 (输入, 内部下拉)
+// ⚠️ 避开 PA0/PA1(CH340)和时钟引脚 PA2~PA6
 #define KEY_ROWS 4
 #define KEY_COLS 4
 
@@ -594,31 +595,29 @@ static const uint8_t key_map[KEY_ROWS][KEY_COLS] = {
 };
 
 void matrix_key_init(void) {
-    // 行 → 输出, 初始低
     for (int r = 0; r < KEY_ROWS; r++) {
-        DL_GPIO_setDirection(GPIOA, (1 << r), DL_GPIO_OUTPUT);
-        DL_GPIO_clearPins(GPIOA, (1 << r));
+        DL_GPIO_setDirection(GPIOB, (1 << (8 + r)), DL_GPIO_OUTPUT);
+        DL_GPIO_clearPins(GPIOB, (1 << (8 + r)));
     }
-    // 列 → 输入, 内部下拉
     for (int c = 0; c < KEY_COLS; c++) {
-        DL_GPIO_setDirection(GPIOA, (1 << (4 + c)), DL_GPIO_INPUT);
-        DL_GPIO_setInternalResistor(GPIOA, (1 << (4 + c)), DL_GPIO_RESISTOR_PULL_DOWN);
+        DL_GPIO_setDirection(GPIOB, (1 << (12 + c)), DL_GPIO_INPUT);
+        DL_GPIO_setInternalResistor(GPIOB, (1 << (12 + c)), DL_GPIO_RESISTOR_PULL_DOWN);
     }
 }
 
 char matrix_key_scan(void) {
     for (int r = 0; r < KEY_ROWS; r++) {
-        DL_GPIO_setPins(GPIOA, (1 << r));  // 当前行拉高
-        delay_us(10);  // 等待电平稳定
+        DL_GPIO_setPins(GPIOB, (1 << (8 + r)));
+        delay_us(10);
         for (int c = 0; c < KEY_COLS; c++) {
-            if (DL_GPIO_readPins(GPIOA, (1 << (4 + c)))) {
-                DL_GPIO_clearPins(GPIOA, (1 << r));
-                delay_ms(20);  // 消抖
-                while (DL_GPIO_readPins(GPIOA, (1 << (4 + c))));  // 等释放
+            if (DL_GPIO_readPins(GPIOB, (1 << (12 + c)))) {
+                DL_GPIO_clearPins(GPIOB, (1 << (8 + r)));
+                delay_ms(20);
+                while (DL_GPIO_readPins(GPIOB, (1 << (12 + c))));
                 return key_map[r][c];
             }
         }
-        DL_GPIO_clearPins(GPIOA, (1 << r));
+        DL_GPIO_clearPins(GPIOB, (1 << (8 + r)));
     }
     return 0;
 }
@@ -627,38 +626,37 @@ char matrix_key_scan(void) {
 ### --- EC11 旋转编码器 ---
 
 ```c
-// A 相 PA6, B 相 PA7, 按键 PA5 (均有中断)
-// SysConfig: PA5/PA6/PA7 → GPIO 输入 → 双边沿中断 → GROUP1_IRQHandler
+// A相 PB2, B相 PB3, 按键 PB4 (均有中断, 避开PA时钟引脚)
+// SysConfig: PB2/PB3/PB4 → GPIO 输入 → 双边沿中断 → GROUP1_IRQHandler
 volatile int32_t ec11_count = 0;
 volatile bool    ec11_button = false;
 
 void GROUP1_IRQHandler(void) {
-    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA,
-                        DL_GPIO_PIN_5 | DL_GPIO_PIN_6 | DL_GPIO_PIN_7);
+    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOB,
+                        DL_GPIO_PIN_2 | DL_GPIO_PIN_3 | DL_GPIO_PIN_4);
     // A/B 相位判断
-    if (status & DL_GPIO_PIN_6) { // A 相变化
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_6);
-        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_6)) {  // A 上升沿
-            if (!DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_7)) ec11_count++;  // A 超前 B
+    if (status & DL_GPIO_PIN_2) {
+        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_2);
+        if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) {
+            if (!DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) ec11_count++;
             else                                        ec11_count--;
-        } else {  // A 下降沿
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_7)) ec11_count++;
+        } else {
+            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) ec11_count++;
             else                                         ec11_count--;
         }
     }
-    if (status & DL_GPIO_PIN_7) {  // B 相变化 (同上逻辑)
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_7);
-        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_7)) {
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_6)) ec11_count++;
+    if (status & DL_GPIO_PIN_3) {
+        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_3);
+        if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) {
+            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) ec11_count++;
             else                                         ec11_count--;
         } else {
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_6)) ec11_count--;
+            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) ec11_count--;
             else                                         ec11_count++;
         }
     }
-    // 按键
-    if (status & DL_GPIO_PIN_5) {
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_5);
+    if (status & DL_GPIO_PIN_4) {
+        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_4);
         ec11_button = true;
     }
 }
@@ -1343,9 +1341,12 @@ volatile uint8_t segment = 0;     // 0=AB, 1=BC, 2=CD, 3=DA
 volatile float   segment_dist = 0; // 当前段已行驶距离
 
 // 编码器累计: 在定时中断中每1ms累加
-// 车轮周长 = π×直径, 编码器线数 = 脉冲数/圈
-#define WHEEL_CIRCUMFERENCE 20.42f  // π×6.5cm
-#define ENCODER_PPR         390     // 电机编码器脉冲数/圈(含减速比)
+// MG310 电机: 减速比 1:20.409, 霍尔编码器 13PPR
+// 输出轴 PPR = 13 × 20.409 ≈ 265 (霍尔版) 或 500 × 20.409 ≈ 10204 (GMR版)
+// 车轮: 48mm 橡胶轮胎, 周长 = π×4.8cm
+#define WHEEL_CIRCUMFERENCE 15.08f  // π×4.8cm (MG310常用48mm轮胎)
+#define ENCODER_PPR         265     // 霍尔编码器输出轴脉冲数/圈(13×20.409)
+// #define ENCODER_PPR      10204  // GMR编码器版(高精度), 按需切换
 
 void lap_detector_update(int32_t enc_left, int32_t enc_right, float dt) {
     // 左右轮平均距离
@@ -1388,8 +1389,9 @@ void gimbal_set_tilt(float angle_deg) {
 }
 
 // 激光笔开关 (通过 GPIO + MOS/继电器)
-#define LASER_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_9)
-#define LASER_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_9)
+// PA10=激光MOS, PA11=蜂鸣器 (避开I2C0=PA12/PA13)
+#define LASER_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_10)
+#define LASER_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_10)
 ```
 
 ### --- 瞄准几何解算 ---
@@ -1734,12 +1736,12 @@ float compute_target_speed(float dist_to_stop, bool is_final_stop) {
     return MAX_SPEED * dist_to_stop / 40.0f;
 }
 
-// 刹车执行
+// 刹车执行 (TB6612: AIN1=PA7, AIN2=PA14, BIN1=PA15, BIN2=PA18)
 void brake_now(void) {
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_2);   // AIN1=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_3);   // AIN2=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_4);   // BIN1=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_5);   // BIN2=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);    // AIN1=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_14);   // AIN2=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_15);   // BIN1=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_18);   // BIN2=0
     pwm_set_duty(0);  // PWM=0
 }
 ```
@@ -1747,14 +1749,16 @@ void brake_now(void) {
 ### --- 声光指示 ---
 
 ```c
-#define BUZZER_PIN  DL_GPIO_PIN_12  // PA12
-#define LED_PIN     DL_GPIO_PIN_13  // PA13
+#define BUZZER_PIN  DL_GPIO_PIN_11  // PA11 (避开I2C0=PA12/PA13)
+#define LED_PIN     DL_GPIO_PIN_10  // PA10 指示灯
 
 void indicator_beep(uint8_t times, uint32_t duration_ms) {
     for (int i = 0; i < times; i++) {
-        DL_GPIO_setPins(GPIOA, BUZZER_PIN | LED_PIN);
+        DL_GPIO_setPins(GPIOA, BUZZER_PIN);  // 蜂鸣器
+        DL_GPIO_setPins(GPIOA, LED_PIN);     // LED
         delay_ms(duration_ms);
-        DL_GPIO_clearPins(GPIOA, BUZZER_PIN | LED_PIN);
+        DL_GPIO_clearPins(GPIOA, BUZZER_PIN);
+        DL_GPIO_clearPins(GPIOA, LED_PIN);
         if (times > 1) delay_ms(150);
     }
 }
@@ -1787,11 +1791,11 @@ typedef enum {
 } MotorDirection;
 
 void motor_set_forward(void) {
-    // 硬件锁定前进方向
-    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_2);    // AIN1=1
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_3);  // AIN2=0
-    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_4);    // BIN1=1
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_5);  // BIN2=0
+    // 硬件锁定前进方向 (TB6612: AIN1=PA7, BIN1=PA15)
+    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7);    // AIN1=1
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_14); // AIN2=0
+    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_15);   // BIN1=1
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_18); // BIN2=0
 }
 
 // 安全封装: 差分驱动只调整占空比, 不动方向
@@ -2812,3 +2816,98 @@ vp.loop()
 | 6 | **MMZ内存耗尽** | 大Image用 `alloc=image.ALLOC_MMZ`, 用完 `del` |
 | 7 | **Sensor未stop** | 多 Sensor 每个都要单独 stop |
 | 8 | **Display bind_layer顺序** | 必须先 bind_layer 再 init |
+
+---
+
+## 十五、电赛硬件清单与引脚总表
+
+### MG310 电机参数
+
+| 参数 | 值 |
+|------|-----|
+| 型号 | MG310 直流减速电机 |
+| 额定电压 | **7.4V** (7~13V) |
+| 空载转速 | 500±13% RPM |
+| 空载电流 | ≤220mA |
+| 额定转速 | 400±13% RPM |
+| 额定扭矩 | 0.4 Kgf·cm |
+| 堵转电流 | ≤2.0A (不可长时间堵转) |
+| 减速比 | **1:20.409** |
+| 编码器(霍尔) | 13 PPR → 输出轴 **265 脉冲/圈** |
+| 编码器(GMR) | 500 PPR → 输出轴 **10204 脉冲/圈** |
+| 车轮 | 48mm 橡胶轮胎, 周长 **15.08cm** |
+| 厘米脉冲 | 265 / 15.08 ≈ **17.6 脉冲/cm** (霍尔版) |
+
+### M0G 端硬件引脚总表
+
+| 硬件模块 | 型号/规格 | 天猛星引脚 | 说明 |
+|----------|----------|-----------|------|
+| **TB6612 PWMA** | 电机驱动 | PB0 (TIMA0_C0) | 左电机PWM, 20kHz |
+| **TB6612 AIN1** | | PA7 | 左电机方向1 |
+| **TB6612 AIN2** | | PA14 | 左电机方向2 |
+| **TB6612 PWMB** | | PB1 (TIMA0_C1) | 右电机PWM |
+| **TB6612 BIN1** | | PA15 | 右电机方向1 |
+| **TB6612 BIN2** | | PA18 | 右电机方向2 |
+| **TB6612 STBY** | | 3.3V | 使能 |
+| **TB6612 VM** | | 电池 7.4V | 电机电源 |
+| **TB6612 VCC** | | 3.3V | 逻辑电源 |
+| **MG310 编码器A** | 电机编码器 | PB2 (TIMG) | AB相A信号 |
+| **MG310 编码器B** | | PB3 (TIMG) | AB相B信号 |
+| **TCRT5000 ×5** | 红外循迹 | PA24~PA28 (ADC) | 5路模拟值 |
+| **MPU6050 SDA** | 六轴陀螺仪 | PA12 (I2C0_SDA) | I2C总线 |
+| **MPU6050 SCL** | | PA13 (I2C0_SCL) | |
+| **OLED SDA** | 0.96" SSD1306 | PA12 (I2C0_SDA) | 与MPU6050同总线 |
+| **OLED SCL** | | PA13 (I2C0_SCL) | |
+| **舵机1 Pan** | SG90/MG996R | PA8 (TIMA1_C0) | 50Hz, 500~2500us |
+| **舵机2 Tilt** | SG90/MG996R | PA9 (TIMA1_C1) | 50Hz |
+| **激光笔** | 蓝紫405nm ≤10mW | PA10 (MOS驱动) | GPIO控制MOS开关 |
+| **蜂鸣器** | 有源蜂鸣器 | PA11 | GPIO直接驱动 |
+| **LED 指示** | 红色LED | PA10 (共用) | 串电阻限流 |
+| **EC11 A相** | 旋转编码器 | PB2 | 双边沿中断 |
+| **EC11 B相** | | PB3 | |
+| **EC11 按键** | | PB4 | |
+| **矩阵按键 行** | 4×4 | PB8~PB11 | 输出 |
+| **矩阵按键 列** | | PB12~PB15 | 输入,内部下拉 |
+| **CH340 串口** | 调试/USB | PA0(TX), PA1(RX) | 板载固定不可改 |
+| **SWD 调试** | XDS110 | PA19(SWDIO), PA20(SWCLK) | 调试接口 |
+
+### K230 端硬件引脚总表
+
+| 硬件模块 | 型号/规格 | 庐山派引脚 | 说明 |
+|----------|----------|-----------|------|
+| **摄像头 SCL** | OV5647/GC2093 | GPIO48 (I2C0_SCL) | 板载已有上拉 |
+| **摄像头 SDA** | | GPIO49 (I2C0_SDA) | |
+| **UART2 TXD** | → M0G | GPIO11 (FPIOA) | 视觉数据发送 |
+| **UART2 RXD** | ← M0G | GPIO12 (FPIOA) | 可选ACK |
+| **RGB灯 R** | 板载共阳 | GPIO62 | 低电平亮 |
+| **RGB灯 G** | | GPIO20 | |
+| **RGB灯 B** | | GPIO63 | |
+| **用户按键** | 侧按 | GPIO53 | 下拉,按下=高 |
+
+### 电源方案
+
+| 供电对象 | 电压 | 来源 |
+|----------|------|------|
+| **M0G 天猛星** | 3.3V | 7.4V电池 → AMS1117-3.3 |
+| **TB6612 电机** | 7.4V | 2S锂电池直供 |
+| **MG310 编码器** | 3.3V/5V | 与M0G同电源 |
+| **舵机** | 5~6V | 独立LDO或电池分压 |
+| **K230 庐山派** | 5V (Type-C) | 独立电池/充电宝 |
+| **激光笔** | 3.3V | M0G供电, MOS开关 |
+
+### 已禁用的天猛星引脚
+
+| 引脚 | 原因 |
+|------|------|
+| PA2~PA6 | 时钟引脚, 默认未焊接 |
+| PA0, PA1 | 板载CH340固定占用 |
+
+### 信号冲突检查
+
+| 总线 | 设备 | 地址/通道 |
+|------|------|----------|
+| I2C0 | MPU6050 + OLED | 0x68 + 0x3C (不同地址, 可共存) |
+| TIMA0 PWM | TB6612 (ch0,ch1) | PB0, PB1 |
+| TIMA1 PWM | 舵机 ×2 (ch0,ch1) | PA8, PA9 |
+| ADC | TCRT5000 ×5 | PA24~PA28 (5通道) |
+| TIMG 编码器 | MG310 ×2 + EC11 | 不同TIMG实例 |
