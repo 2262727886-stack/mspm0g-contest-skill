@@ -78,7 +78,7 @@
 // PA8 = Pan, PA9 = Tilt
 
 // EC11 旋转编码器
-// PA16 = A相, PA17 = B相, PA14 = 按键
+// PB2 = A相, PB3 = B相, PB4 = 按键
 
 // 激光笔 / 蜂鸣器
 // PA10 = 激光MOS, PA11 = 蜂鸣器
@@ -577,7 +577,8 @@ void oled_show_float(uint8_t x, uint8_t y, const char *label, float val) {
 
 ```c
 // 4×4 矩阵按键 (4 行输出 + 4 列输入)
-// 行: PA0~PA3 (输出), 列: PA4~PA7 (输入, 内部下拉)
+// 行: PB8~PB11 (输出), 列: PB12~PB15 (输入, 内部下拉)
+// ⚠️ 避开 PA0/PA1(CH340)和时钟引脚 PA2~PA6
 #define KEY_ROWS 4
 #define KEY_COLS 4
 
@@ -589,31 +590,29 @@ static const uint8_t key_map[KEY_ROWS][KEY_COLS] = {
 };
 
 void matrix_key_init(void) {
-    // 行 → 输出, 初始低
     for (int r = 0; r < KEY_ROWS; r++) {
-        DL_GPIO_setDirection(GPIOA, (1 << r), DL_GPIO_OUTPUT);
-        DL_GPIO_clearPins(GPIOA, (1 << r));
+        DL_GPIO_setDirection(GPIOB, (1 << (8 + r)), DL_GPIO_OUTPUT);
+        DL_GPIO_clearPins(GPIOB, (1 << (8 + r)));
     }
-    // 列 → 输入, 内部下拉
     for (int c = 0; c < KEY_COLS; c++) {
-        DL_GPIO_setDirection(GPIOA, (1 << (4 + c)), DL_GPIO_INPUT);
-        DL_GPIO_setInternalResistor(GPIOA, (1 << (4 + c)), DL_GPIO_RESISTOR_PULL_DOWN);
+        DL_GPIO_setDirection(GPIOB, (1 << (12 + c)), DL_GPIO_INPUT);
+        DL_GPIO_setInternalResistor(GPIOB, (1 << (12 + c)), DL_GPIO_RESISTOR_PULL_DOWN);
     }
 }
 
 char matrix_key_scan(void) {
     for (int r = 0; r < KEY_ROWS; r++) {
-        DL_GPIO_setPins(GPIOA, (1 << r));  // 当前行拉高
-        delay_us(10);  // 等待电平稳定
+        DL_GPIO_setPins(GPIOB, (1 << (8 + r)));
+        delay_us(10);
         for (int c = 0; c < KEY_COLS; c++) {
-            if (DL_GPIO_readPins(GPIOA, (1 << (4 + c)))) {
-                DL_GPIO_clearPins(GPIOA, (1 << r));
-                delay_ms(20);  // 消抖
-                while (DL_GPIO_readPins(GPIOA, (1 << (4 + c))));  // 等释放
+            if (DL_GPIO_readPins(GPIOB, (1 << (12 + c)))) {
+                DL_GPIO_clearPins(GPIOB, (1 << (8 + r)));
+                delay_ms(20);
+                while (DL_GPIO_readPins(GPIOB, (1 << (12 + c))));
                 return key_map[r][c];
             }
         }
-        DL_GPIO_clearPins(GPIOA, (1 << r));
+        DL_GPIO_clearPins(GPIOB, (1 << (8 + r)));
     }
     return 0;
 }
@@ -622,38 +621,37 @@ char matrix_key_scan(void) {
 ### --- EC11 旋转编码器 ---
 
 ```c
-// A 相 PA6, B 相 PA7, 按键 PA5 (均有中断)
-// SysConfig: PA5/PA6/PA7 → GPIO 输入 → 双边沿中断 → GROUP1_IRQHandler
+// A相 PB2, B相 PB3, 按键 PB4 (均有中断, 避开PA时钟引脚)
+// SysConfig: PB2/PB3/PB4 → GPIO 输入 → 双边沿中断 → GROUP1_IRQHandler
 volatile int32_t ec11_count = 0;
 volatile bool    ec11_button = false;
 
 void GROUP1_IRQHandler(void) {
-    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA,
-                        DL_GPIO_PIN_5 | DL_GPIO_PIN_6 | DL_GPIO_PIN_7);
+    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOB,
+                        DL_GPIO_PIN_2 | DL_GPIO_PIN_3 | DL_GPIO_PIN_4);
     // A/B 相位判断
-    if (status & DL_GPIO_PIN_6) { // A 相变化
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_6);
-        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_6)) {  // A 上升沿
-            if (!DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_7)) ec11_count++;  // A 超前 B
+    if (status & DL_GPIO_PIN_2) {
+        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_2);
+        if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) {
+            if (!DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) ec11_count++;
             else                                        ec11_count--;
-        } else {  // A 下降沿
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_7)) ec11_count++;
+        } else {
+            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) ec11_count++;
             else                                         ec11_count--;
         }
     }
-    if (status & DL_GPIO_PIN_7) {  // B 相变化 (同上逻辑)
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_7);
-        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_7)) {
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_6)) ec11_count++;
+    if (status & DL_GPIO_PIN_3) {
+        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_3);
+        if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) {
+            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) ec11_count++;
             else                                         ec11_count--;
         } else {
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_6)) ec11_count--;
+            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) ec11_count--;
             else                                         ec11_count++;
         }
     }
-    // 按键
-    if (status & DL_GPIO_PIN_5) {
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_5);
+    if (status & DL_GPIO_PIN_4) {
+        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_4);
         ec11_button = true;
     }
 }
@@ -1383,8 +1381,9 @@ void gimbal_set_tilt(float angle_deg) {
 }
 
 // 激光笔开关 (通过 GPIO + MOS/继电器)
-#define LASER_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_9)
-#define LASER_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_9)
+// PA10=激光MOS, PA11=蜂鸣器 (避开I2C0=PA12/PA13)
+#define LASER_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_10)
+#define LASER_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_10)
 ```
 
 ### --- 瞄准几何解算 ---
@@ -1729,12 +1728,12 @@ float compute_target_speed(float dist_to_stop, bool is_final_stop) {
     return MAX_SPEED * dist_to_stop / 40.0f;
 }
 
-// 刹车执行
+// 刹车执行 (TB6612: AIN1=PA7, AIN2=PA14, BIN1=PA15, BIN2=PA18)
 void brake_now(void) {
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_2);   // AIN1=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_3);   // AIN2=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_4);   // BIN1=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_5);   // BIN2=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);    // AIN1=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_14);   // AIN2=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_15);   // BIN1=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_18);   // BIN2=0
     pwm_set_duty(0);  // PWM=0
 }
 ```
@@ -1742,14 +1741,16 @@ void brake_now(void) {
 ### --- 声光指示 ---
 
 ```c
-#define BUZZER_PIN  DL_GPIO_PIN_12  // PA12
-#define LED_PIN     DL_GPIO_PIN_13  // PA13
+#define BUZZER_PIN  DL_GPIO_PIN_11  // PA11 (避开I2C0=PA12/PA13)
+#define LED_PIN     DL_GPIO_PIN_10  // PA10 指示灯
 
 void indicator_beep(uint8_t times, uint32_t duration_ms) {
     for (int i = 0; i < times; i++) {
-        DL_GPIO_setPins(GPIOA, BUZZER_PIN | LED_PIN);
+        DL_GPIO_setPins(GPIOA, BUZZER_PIN);  // 蜂鸣器
+        DL_GPIO_setPins(GPIOA, LED_PIN);     // LED
         delay_ms(duration_ms);
-        DL_GPIO_clearPins(GPIOA, BUZZER_PIN | LED_PIN);
+        DL_GPIO_clearPins(GPIOA, BUZZER_PIN);
+        DL_GPIO_clearPins(GPIOA, LED_PIN);
         if (times > 1) delay_ms(150);
     }
 }
@@ -1782,11 +1783,11 @@ typedef enum {
 } MotorDirection;
 
 void motor_set_forward(void) {
-    // 硬件锁定前进方向
-    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_2);    // AIN1=1
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_3);  // AIN2=0
-    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_4);    // BIN1=1
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_5);  // BIN2=0
+    // 硬件锁定前进方向 (TB6612: AIN1=PA7, BIN1=PA15)
+    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7);    // AIN1=1
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_14); // AIN2=0
+    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_15);   // BIN1=1
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_18); // BIN2=0
 }
 
 // 安全封装: 差分驱动只调整占空比, 不动方向

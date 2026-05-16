@@ -31,16 +31,63 @@ description: MSPM0G电赛开发助手
 | 供电 | 1.62V ~ 3.6V |
 | 封装 | LQFP48 / LQFP64 / VQFN32 |
 
-### 常用引脚映射 (LQFP48)
-| 外设功能 | 默认引脚 | 备注 |
-|----------|----------|------|
-| SWCLK | PA0 | 调试时钟 |
-| SWDIO | PA1 | 调试数据 |
-| UART0 TX/RX | PA10/PA11 | 调试串口 |
-| I2C0 SDA/SCL | PA8/PA9 | OLED 等 |
-| SPI0 PICO/POCI/SCK/CS0 | PB6/PB7/PB4/PB5 | SPI 外设 |
-| TIMA0 PWM | PB0~PB3 | 电机 PWM |
-| ADC0 A0~A7 | 见数据手册 | 模拟输入 |
+### 天猛星引脚映射 (LQFP64, 80Pin引出)
+
+**⚠️ 天猛星为 64Pin LQFP 封装，非 48Pin。以下均为实际板载引脚。**
+
+| 类别 | 引脚 | 片上复用功能 | 天猛星用途 |
+|------|------|-------------|-----------|
+| **调试** | PA20 | SWCLK | SWD 调试时钟 |
+| | PA19 | SWDIO | SWD 调试数据 |
+| **串口(CH340)** | PA0 | UART0_TX / I2C0_SDA / TIMA0_C0 | 板载 CH340 → PC |
+| | PA1 | UART0_RX / I2C0_SCL / TIMA0_C1 | 板载 CH340 → PC |
+| **I2C0** | PA12 | I2C0_SDA / UART2_TX / TIMG8_C1 | OLED/MPU6050 SDA |
+| | PA13 | I2C0_SCL / UART2_RX / TIMG8_C0 | OLED/MPU6050 SCL |
+| **SPI0** | PB4 | SPI0_SCK | TFT / SPI 外设 SCK |
+| | PB6 | SPI0_PICO (MOSI) | TFT / SPI 外设 MOSI |
+| | PB7 | SPI0_POCI (MISO) | TFT / SPI 外设 MISO |
+| | PB5 | SPI0_CS0 | TFT / SPI 外设 CS |
+| **TIMA0 PWM** | PB0~PB3 | TIMA0_C0~C3 | 电机驱动 4路PWM |
+| **TIMA1 PWM** | PA8~PA11 | TIMA1_C0~C3 | 舵机/辅助PWM |
+| **ADC** | PA24~PA31 | ADC12 通道 | 传感器模拟采集 |
+| | PA26/PA27 | ADC+GPIO 双功能 | **培训案例默认用这对** |
+| **GPIO(常用)** | PA7 | UART3_TX / I2C1_SCL / TIMA0_C3 | 继电器/通用输出 |
+| | PA14 | I2C1_SCL | 辅助 I2C |
+| | PA15 | I2C1_SDA | 辅助 I2C |
+| | PA18 | UART2_TX / I2C1_SDA | 辅助串口 |
+| **时钟(禁用)** | PA2~PA6 | ROSC/LFXIN/HFXIN | **默认未焊接，勿用** |
+| **复位** | NRST | RST | 复位按键 |
+
+### 外设推荐引脚组合
+
+```c
+// === 竞赛常用引脚分配 ===
+
+// 调试串口 (CH340, 固定不可改)
+// PA0 = UART0_TX, PA1 = UART0_RX
+
+// 电机 PWM (TB6612) — TIMA0
+// PB0 = PWMA, PB1 = PWMB
+// 方向: PA7(AIN1), PA14(AIN2), PA15(BIN1), PA18(BIN2)
+
+// 编码器 — TIMG (AB相)
+// PB2 = A相, PB3 = B相
+
+// OLED + MPU6050 — I2C0
+// PA12 = SDA, PA13 = SCL
+
+// TCRT5000 循迹 — ADC
+// PA24=左1, PA25=左2, PA26=中, PA27=右2, PA28=右1 (5路)
+
+// 舵机 — TIMA1
+// PA8 = Pan, PA9 = Tilt
+
+// EC11 旋转编码器
+// PA16 = A相, PA17 = B相, PA14 = 按键
+
+// 激光笔 / 蜂鸣器
+// PA10 = 激光MOS, PA11 = 蜂鸣器
+```
 
 ---
 
@@ -52,41 +99,37 @@ description: MSPM0G电赛开发助手
 
 **数字输出 (LED/继电器)：**
 ```c
+// ⚠️ 天猛星: PA2~PA6 为时钟引脚, PA0/PA1 被 CH340 占用, 请用 PA7/PA14/PA15 等
 #include "ti_msp_dl_config.h"
 
 void gpio_output_init(void) {
-    // 假设 SysConfig 中已配置 PA2 为输出
-    // 手动裸写方式:
-    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_2, DL_GPIO_OUTPUT);
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_2);  // 初始低电平
+    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_7, DL_GPIO_OUTPUT);
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);  // 初始低电平
 }
 
-// 使用宏操作（更快）：
-#define LED_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_2)
-#define LED_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_2)
-#define LED_TOGGLE() DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_2)
+#define LED_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7)
+#define LED_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7)
+#define LED_TOGGLE() DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_7)
 ```
 
 **数字输入 (按键)：**
 ```c
 void gpio_input_init(void) {
-    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_3, DL_GPIO_INPUT);
-    DL_GPIO_setInternalResistor(GPIOA, DL_GPIO_PIN_3, DL_GPIO_RESISTOR_PULL_UP);
-    // SysConfig 中可启用中断，生成 GROUP1_IRQHandler
+    // PA14 = 按键, 内部上拉
+    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_14, DL_GPIO_INPUT);
+    DL_GPIO_setInternalResistor(GPIOA, DL_GPIO_PIN_14, DL_GPIO_RESISTOR_PULL_UP);
 }
 
-// 读取按键状态：
-uint32_t key_state = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_3);
+uint32_t key_state = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14);
 ```
 
 **GPIO 中断 (按键触发)：**
 ```c
 void GROUP1_IRQHandler(void) {
-    // 读取中断状态
-    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_3);
-    if (status & DL_GPIO_PIN_3) {
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_3);
-        // 处理按键事件 — 消抖、置标志位
+    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_14);
+    if (status & DL_GPIO_PIN_14) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_14);
+        // 处理按键事件 — 置标志位
     }
 }
 ```
@@ -206,7 +249,7 @@ int fputc(int ch, FILE *f) {
     return ch;
 }
 
-// SysConfig: UART0 → 115200-8-N-1
+// SysConfig: UART0(PA0=TX,PA1=RX, 板载CH340) → 115200-8-N-1
 void uart_init(void) {
     // SysConfig 自动生成完整初始化
 }
@@ -225,7 +268,7 @@ void UART0_INST_IRQHandler(void) {
 #define OLED_ADDR 0x3C
 
 void i2c_init(void) {
-    // SysConfig: I2C0 → 主机模式 → 400kHz (Fast Mode)
+    // SysConfig: I2C0(PA12=SDA,PA13=SCL) → 主机模式 → 400kHz (Fast Mode)
     DL_I2C_setPeripheralMode(I2C0, DL_I2C_PERIPHERAL_MODE_CONTROLLER);
 }
 
@@ -259,7 +302,7 @@ void spi_transfer(uint8_t *tx, uint8_t *rx, uint16_t len) {
 
 ```c
 // SysConfig: TIMG2 → Input Capture 模式 → 一个引脚做 TRIG (GPIO), 一个做 ECHO (捕获)
-#define TRIG_PIN  DL_GPIO_PIN_4  // PA4
+#define TRIG_PIN  DL_GPIO_PIN_15  // PA15 (PA4为时钟引脚,不能用)
 #define TRIG_PORT GPIOA
 
 volatile uint32_t echo_start = 0;
@@ -925,12 +968,12 @@ void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
 **TB6612 电机驱动：**
 | TB6612 | MSPM0G | 说明 |
 |--------|--------|------|
-| PWMA | PB0 (TIMA0_C0) | PWM |
-| AIN1 | PA2 | 方向 1 |
-| AIN2 | PA3 | 方向 2 |
-| PWMB | PB1 (TIMA0_C1) | PWM |
-| BIN1 | PA4 | 方向 1 |
-| BIN2 | PA5 | 方向 2 |
+| PWMA | PB0 (TIMA0_C0) | PWM, 20kHz |
+| AIN1 | PA7 | 方向 1 |
+| AIN2 | PA14 | 方向 2 |
+| PWMB | PB1 (TIMA0_C1) | PWM, 20kHz |
+| BIN1 | PA15 | 方向 1 |
+| BIN2 | PA18 | 方向 2 |
 | STBY | 3.3V | 使能 |
 | VM | 电池+ (7~12V) | 电机电源 |
 | VCC | 3.3V | 逻辑电源 |
@@ -938,24 +981,24 @@ void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
 **MPU6050 (I2C 陀螺仪+加速度计)：**
 | MPU6050 | MSPM0G |
 |---------|--------|
-| SDA | PA8 (I2C0_SDA) |
-| SCL | PA9 (I2C0_SCL) |
+| SDA | PA12 (I2C0_SDA) |
+| SCL | PA13 (I2C0_SCL) |
 | VCC | 3.3V |
 | AD0 | GND (地址 0x68) |
 
 **0.96" OLED SSD1306 (I2C)：**
 | OLED | MSPM0G |
 |------|--------|
-| SDA | PA8 (I2C0_SDA) |
-| SCL | PA9 (I2C0_SCL) |
+| SDA | PA12 (I2C0_SDA) |
+| SCL | PA13 (I2C0_SCL) |
 | VCC | 3.3V |
 | 地址 | 0x3C |
 
 **HC-05 蓝牙模块 (UART)：**
 | HC-05 | MSPM0G |
 |-------|--------|
-| TX | PA11 (UART0_RX) |
-| RX | PA10 (UART0_TX) |
+| TX | PA1 (UART0_RX) |
+| RX | PA0 (UART0_TX) |
 | VCC | 5V 或 3.3V |
 
 **AMS1117-3.3 LDO 供电方案：**
@@ -1151,13 +1194,15 @@ void button_update(Button *btn, bool pressed) {
 ## 八、注意事项
 
 - MSPM0G 是 3.3V 系统，GPIO 不可直接接 5V（部分引脚可耐受 5V，查看数据手册）
+- **天猛星 PA2~PA6 为时钟引脚，默认未焊接，勿用！** PA0/PA1 被 CH340 固定占用
+- **SWCLK=PA20, SWDIO=PA19**（非 PA0/PA1）
 - ADC 输入电压范围 0 ~ VREF，超出会损坏
 - 使用内部运放前必须先使能，使用后及时禁用省电
 - 中断回调函数中不要做耗时操作，只置标志位
 - PWM 死区用于 H 桥，避免上下管直通短路
-- I2C 必须加上拉电阻 (4.7kΩ to 3.3V)
+- I2C 默认使用 PA12(SDA)+PA13(SCL)，板载已有上拉可不再加
 - 电机编码器线长尽量短，必要时加屏蔽
-- 用户即将提供数据手册 PDF，届时可根据精确参数更新代码
+- 双 K230+M0G 系统必须共地，供电独立隔离
 
 ---
 
@@ -2239,3 +2284,531 @@ void green_main(void) {
     }
 }
 ```
+
+---
+
+## 十二、立创庐山派 K230 CanMV API 速查
+
+K230 是嘉楠科技 RISC-V AI 芯片，CanMV 是其 MicroPython 移植。仅软定时器可用，硬件 Timer 0-5 暂不可用。
+
+### --- system ---
+
+```python
+import machine, gc, uos, time, utime, uhashlib, ucryptolib
+
+machine.reset()          # SoC 复位
+machine.temperature()    # 芯片温度 (float)
+machine.chipid()         # 芯片 ID → bytearray(32)
+machine.mem_copy(dst, src, size)
+
+gc.enable(); gc.disable(); gc.collect()
+gc.mem_alloc()                      # 已分配堆内存 (byte)
+gc.mem_free()                        # 可用堆内存 (byte)
+gc.sys_total()                       # 系统总内存
+gc.sys_heap() / sys_page() / sys_mmz()  # 返回 (total, free, used) 元组
+
+utime.sleep(seconds); utime.sleep_ms(ms); utime.sleep_us(us)
+utime.ticks_ms(); utime.ticks_us(); utime.ticks_diff(t1, t2)
+c = utime.clock()         # 创建时钟对象
+c.tick()                  # 记录当前时间
+c.fps()                   # 返回帧率
+c.reset(); c.avg()        # 重置 / 平均耗时
+
+uhashlib.sha256([data])   # 硬件加速 SHA256
+obj.update(data)          # 追加数据
+obj.digest()              # 获取哈希 → bytes (只能调用一次！)
+# hexdigest 未实现，用 binascii.hexlify(hash.digest()) 代替
+
+ucryptolib.aes(key, mode=0, IV, AAD)   # AES-GCM 硬件加速
+ucryptolib.sm4(key, mode, IV)          # SM4-ECB/CBC
+cipher.encrypt(pt); cipher.decrypt(ct)
+```
+
+### --- FPIOA (引脚复用) ---
+
+```python
+# ⚠️ K230 所有外设需先通过 FPIOA 配置引脚功能，再使用！
+from machine import FPIOA
+fpioa = FPIOA()
+# 将 GPIO11 配置为 UART2_TXD
+fpioa.set_function(11, FPIOA.UART2_TXD)
+# 将 GPIO12 配置为 UART2_RXD
+fpioa.set_function(12, FPIOA.UART2_RXD)
+# 查询引脚当前功能
+fpioa.get_pin_func(11)
+# 查询功能当前所在引脚
+fpioa.get_pin_num(FPIOA.UART2_TXD)
+# 打印所有引脚配置信息
+fpioa.help()
+# 每个引脚同一时刻只能激活一种功能
+```
+
+### --- GPIO / ADC / PWM ---
+
+```python
+from machine import Pin, ADC, PWM, FPIOA
+
+fpioa = FPIOA()
+# 先配置FPIOA，再使用GPIO
+fpioa.set_function(pin_number, FPIOA.GPIOx)
+
+# GPIO: 64 个引脚 [0~63], 3.3V电平
+pin = Pin(2, Pin.OUT, pull=Pin.PULL_NONE, drive=7)
+pin.value(1); pin.value(0)
+pin.on(); pin.off(); pin.high(); pin.low()
+# drive: 0~15, 默认7, 最大15(除BOOT0/1)
+# Pin.irq() 自 2025年5月固件起支持; 老固件用 GPIO.irq()(仅GPIOHS引脚)
+
+# 板载RGB灯: 共阳, GPIO62=R, GPIO20=G, GPIO63=B (低电平亮)
+# 板载按键: GPIO53, 按下=高电平, 需配置内部下拉
+
+# ⚠️ ADC: 仅 FPC 排线座引出, 4通道, 最高 1.8V 输入!
+# 普通排针上无 ADC 功能, 超1.8V会烧毁芯片
+adc = ADC(0)
+adc.read_u16()     # 0~4095
+adc.read_uv()      # 0~1800000 uV
+
+# PWM: 6 通道 [0~5], ch0-2 同频率, ch3-5 同频率
+pwm = PWM(0, freq=1000, duty=50, enable=True)
+pwm.freq(2000); pwm.duty(30)
+pwm.enable(True/False); pwm.deinit()
+```
+
+### --- UART / I2C / SPI ---
+
+```python
+from machine import UART, I2C, I2C_Slave, SPI
+
+# UART: UART2(GPIO11=TXD,GPIO12=RXD) 和 UART3(GPIO50=TXD,GPIO51=RXD) 可用
+# UART0(GPIO38/39) 被大核RT-Smart占用, UART1不可用
+u = UART(UART.UART2, baudrate=115200, bits=UART.EIGHTBITS,
+         parity=UART.PARITY_NONE, stop=UART.STOPBITS_ONE)
+u.write(buf); u.read([n]); u.readline(); u.readinto(buf)
+
+# I2C: I2C0(GPIO48=SCL,GPIO49=SDA) I2C1(GPIO40=SCL,GPIO41=SDA)
+# ⚠️ 庐山派板载I2C已有内部上拉电阻, 外设不用再加
+i2c = I2C(0, freq=100000)
+i2c.scan()                      # → [addr, ...]
+i2c.readfrom(addr, len, True)   # → bytes
+i2c.writeto(addr, buf, True)    # → 发送字节数
+i2c.readfrom_mem(addr, memaddr, nbytes, mem_size=8)
+i2c.writeto_mem(addr, memaddr, buf, mem_size=8)
+i2c.deinit()
+
+# I2C 从机 (需编译时开启)
+i2c_s = I2C_Slave(I2C_Slave.list()[0], addr=0x10, mem_size=20)
+i2c_s.readfrom_mem(0, n)        # 读主设备写入的数据
+i2c_s.writeto_mem(0, data)      # 写数据供主设备读取
+
+# SPI: 3 个模块 [0~2]
+spi = SPI(0, baudrate=5000000, polarity=0, phase=0, bits=8)
+spi.write(buf); spi.read(nbytes); spi.readinto(buf)
+spi.write_readinto(wbuf, rbuf)  # 全双工
+spi.deinit()
+```
+
+### --- GPIO 中断 (Pin.irq / GPIO.irq) ---
+
+```python
+# 方法1: Pin.irq() — 2025年5月+固件支持
+from machine import Pin
+pin = Pin(53, Pin.IN, Pin.PULL_DOWN)
+pin.irq(handler=lambda p: print("pressed"), trigger=Pin.IRQ_RISING)
+
+# 方法2: GPIO.irq() — 老固件兼容, 仅GPIOHS引脚
+from machine import GPIO
+# GPIOHS 引脚号 0~31 对应可中断引脚(非物理引脚号)
+GPIO.irq(0, GPIO.IRQ_RISING, lambda n: print(f"GPIOHS{n}"), GPIO.WAKEUP_NOT_SUPPORT, 7)
+# TRIGGER: GPIO.IRQ_RISING / IRQ_FALLING / IRQ_BOTH
+```
+
+### --- Timer / RTC / Display ---
+
+```python
+from machine import Timer, RTC
+
+# ⚠️ 硬件 Timer [0-5] 暂不可用，只用软件定时器
+tim = Timer(-1)  # -1 = 软件定时器
+tim.init(period=100, mode=Timer.ONE_SHOT, callback=lambda t: print(1))
+tim.init(period=1000, mode=Timer.PERIODIC, callback=lambda t: print(2))
+tim.deinit()
+
+rtc = RTC()
+rtc.init((2024, 2, 28, 2, 23, 59, 0, 0))
+rtc.datetime()  # → (year, mon, day, wday, hour, min, sec, microsec)
+
+# LCD (SPI 接口)
+from machine import SPI_LCD
+lcd = SPI_LCD(spi, pin_dc, pin_cs, pin_rst, bl=pin_bl, type=SPI_LCD.ST7789)
+lcd.configure(320, 240, hmirror=False, vflip=True, bgr=False)
+img = lcd.init()               # → Image 对象 (显存)
+img.clear()
+img.draw_string_advanced(0, 0, 32, "你好", color=(255, 0, 0))
+lcd.show()                     # 刷新到屏幕
+lcd.fill(color); lcd.pixel(x, y, color)
+lcd.light(50)                  # 背光 0~100
+```
+
+### --- Sensor (摄像头) ---
+
+```python
+from media.sensor import Sensor
+
+sensor = Sensor(id=0, width=1280, height=720, fps=60)
+sensor.reset()
+sensor.set_pixformat(sensor.RGB888, chn=CAM_CHN_ID_0)
+sensor.set_framesize(chn=CAM_CHN_ID_0, width=640, height=480)
+sensor.set_hmirror(True)
+sensor.set_vflip(False)
+sensor.run()                   # 必须在 MediaManager.init() 之前
+img = sensor.snapshot(chn=CAM_CHN_ID_0)  # 捕获一帧 → Image
+sensor.stop()
+
+# 支持传感器: OV5647(2592×1944@10fps), GC2093(1920×1080@60fps), IMX335
+# 像素格式: RGB565, RGB888, YUV420SP, GRAYSCALE
+```
+
+### --- Display ---
+
+```python
+from media.display import Display
+
+# 支持的屏幕: ST7701(800×480), LT9611 HDMI(1920×1080), HX8377(1080×1920), VIRT(IDE调试)
+Display.init(Display.ST7701, width=800, height=480, to_ide=True)
+Display.show_image(img, x=0, y=0, layer=LAYER_OSD0)
+Display.bind_layer(src=sensor.bind_info(), dstlayer=LAYER_VIDEO1)
+Display.deinit()
+```
+
+### --- YOLO 推理 ---
+
+```python
+from libs.YOLO import YOLOv5, YOLOv8, YOLO11
+
+# task_type: "classify"/"detect"/"segment"
+# mode: "image" 或 "video"
+yolo = YOLOv5(task_type="detect", mode="image",
+    kmodel_path="/data/kmodel.kmodel",
+    labels=["apple","banana","orange"],
+    rgb888p_size=[1280,720],
+    model_input_size=[320,320],
+    conf_thresh=0.5, nms_thresh=0.45,
+    max_boxes_num=50, debug_mode=0)
+
+yolo.config_preprocess()
+res = yolo.run(img_numpy)       # HWC→CHW 格式, ulab.numpy.ndarray
+yolo.draw_result(res, img_ori)  # 绘制结果到 Image
+yolo.deinit()
+# YOLOv8/YOLO11 接口相同，仅类名不同
+```
+
+### --- PipeLine (视频流) ---
+
+```python
+from libs.PipeLine import PipeLine, ScopedTiming
+
+pl = PipeLine(rgb888p_size=[1280,720], display_size=[1920,1080], display_mode="hdmi")
+pl.create()
+while True:
+    img = pl.get_frame()       # 从 sensor 取一帧
+    # ... 推理 ...
+    pl.show_image()            # 显示结果
+pl.destroy()
+```
+
+---
+
+## 十三、K230 API 已知问题
+
+| # | 模块 | 问题 |
+|---|------|------|
+| 1 | **gc** | 概述 `sys_totoal` 拼写错误 → 应为 `sys_total` |
+| 2 | **hashlib** | 返回值文档错误——`sha256()/digest()/update()` 返回值表格写"0成功/非0失败"，实际 `sha256()` 返回对象、`digest()` 返回 bytes、`update()` 返回 None |
+| 3 | **ucryptolib** | SM4 的 `mode` 参数未映射——文档只说支持 ECB/CBC，但未说明 `mode=0` 是 ECB 还是 CBC（示例中 `mode=1` 是 CBC） |
+| 4 | **Timer** | **硬件定时器 [0-5] 暂不可用**，仅 `Timer(-1)` 软件定时器可用。多路定时需求需自行用 `ticks_ms` 实现 |
+| 5 | **I2C Slave** | `I2C_Slave.list()` 返回设备 ID 列表，但 ID 含义未说明。需从示例代码反推用法 |
+| 6 | **hashlib** | `hexdigest()` 方法未实现，需用 `binascii.hexlify(hash.digest())` 替代 |
+| 7 | **Sensor** | 说明"同时使用多个传感器时，仅需其中一个执行 run"，但 stop 需每个都调用——容易遗漏 |
+| 8 | **Display** | `bind_layer()` 必须在 `init()` 之前调用，顺序要求容易出错 |
+| 9 | **uctypes** | 位域定义语法 `offset \| type \| lsbit<<BF_POS \| bitsize<<BF_LEN` 极易写错，无误用保护 |
+| 10 | **Pin 中断** | 老固件(≤2025.4)不支持 Pin.irq()，**2025年5月+固件**已支持。老版本可用 `GPIO.irq()`(仅GPIOHS引脚)替代 |
+| 11 | **ADC 电压** | ADC 仅支持 **1.8V 输入**，超压会烧毁芯片！ADC 仅在 FPC 排线座引出，普通排针无 ADC |
+| 12 | **I2C 上拉** | I2C0/1 板载已有内部上拉电阻，外接 I2C 模块不需再加 |
+| 13 | **FPIOA 必配** | 所有外设使用前必须 `fpioa.set_function()`，否则不工作 |
+| 14 | **固件分支** | `canmv_k230`(RTOS纯MicroPython)是唯一维护分支，旧 `k230_canmv`(Linux+RTOS双系统)已停止维护 |
+| 15 | **UART 中断** | UART 等外设硬件中断未暴露给 MicroPython，仅 GPIO 中断可用 |
+
+---
+
+## 十四、K230 + MSPM0G 双芯电赛完整方案
+
+### 架构总览
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    K230 (视觉大脑)                     │
+│  Sensor → Image → find_blobs/circles/apriltags       │
+│  → 坐标计算 → UART 发送                              │
+│  功耗: 3W, 独立电池                                   │
+└────────────────────┬─────────────────────────────────┘
+                     │ UART (115200, 帧协议)
+┌────────────────────┴─────────────────────────────────┐
+│                   MSPM0G (运动小脑)                    │
+│  接收坐标 → PID 控制 → 电机/舵机执行                   │
+│  功耗: 0.1W, 独立电池                                 │
+└──────────────────────────────────────────────────────┘
+```
+
+**双芯硬件连接：**
+| K230 (庐山派) | MSPM0G (天猛星) | 说明 |
+|---------------|-----------------|------|
+| GPIO11 (UART2_TXD) | PA1 (UART0_RX) | 视觉→控制 数据 |
+| GPIO12 (UART2_RXD) | PA0 (UART0_TX) | 可选ACK回传 |
+| GND | GND | 必须共地 |
+| 独立电池 5V | 独立电池 7.4V | 供电隔离 |
+
+**⚠️ K230 启动前必须配置 FPIOA：**
+```python
+fpioa = FPIOA()
+fpioa.set_function(11, FPIOA.UART2_TXD)
+fpioa.set_function(12, FPIOA.UART2_RXD)
+# 之后才能 uart = UART(UART.UART2, ...)
+```
+
+### K230 视觉竞赛速查
+
+```python
+# === 红光斑检测 (23年E题核心) ===
+import sensor, image, time, gc
+from machine import UART
+import struct
+
+uart = UART(UART.UART2, baudrate=115200)
+
+sensor.reset()
+sensor.set_pixformat(sensor.RGB565)
+sensor.set_framesize(sensor.QVGA)  # 320x240
+sensor.run()
+
+# LAB红色阈值: (L_min, L_max, A_min, A_max, B_min, B_max)
+# 现场用 IDE 阈值编辑器校准！以下为参考值
+RED_THRESHOLD   = [(30, 100, 15, 127, 0, 127)]
+GREEN_THRESHOLD = [(30, 100, -128, -15, 0, 127)]
+
+def pixel_to_screen(px, py, img_w=320, img_h=240, screen_w=50, screen_h=50):
+    """像素坐标 → 屏幕坐标(cm), 原点屏幕中心"""
+    return ((px - img_w/2) * screen_w / img_w,
+            (py - img_h/2) * screen_h / img_h)
+
+while True:
+    img = sensor.snapshot()
+    blobs = img.find_blobs(RED_THRESHOLD, pixels_threshold=5,
+                           area_threshold=10, merge=True)
+    if blobs:
+        b = blobs[0]
+        img.draw_cross(b.cx(), b.cy(), color=(0,255,0), size=10)
+        sx, sy = pixel_to_screen(b.cx(), b.cy())
+        # UART 发给 M0G
+        buf = bytearray(10)
+        buf[0]=0xA5; buf[1]=0x5A; buf[2]=0x01
+        struct.pack_into('<h', buf, 3, int(sx*10))
+        struct.pack_into('<h', buf, 5, int(sy*10))
+        struct.pack_into('<h', buf, 7, len(blobs))
+        buf[9] = sum(buf[:9]) & 0xFF ^ 0xFF
+        uart.write(buf)
+    gc.collect()
+```
+
+### 双芯通信帧协议 (10字节定长)
+
+```
+| 0xA5 | 0x5A | CMD | X(2B) | Y(2B) | EXTRA(2B) | CHKSUM |
+  帧头   帧头   命令   坐标    坐标    附加数据     校验(=前9B异或)
+```
+
+```c
+// === M0G 端接收 ===
+// CMD定义:
+#define CMD_BLOB_POS   0x01  // 光斑坐标, X/Y单位0.1mm
+#define CMD_CIRCLE     0x02  // 圆检测, EXTRA=半径(cm*10)
+#define CMD_PHASE      0x03  // 画圆相位, EXTRA=0~359度
+#define CMD_LOST       0x04  // 目标丢失
+#define CMD_STOP       0xFF  // 急停
+
+void handle_vision_frame(uint8_t cmd, int16_t x, int16_t y, int16_t extra) {
+    switch (cmd) {
+    case CMD_BLOB_POS:
+        target_x_cm = x / 10.0f;
+        target_y_cm = y / 10.0f;
+        break;
+    case CMD_CIRCLE:
+        target_center_x = x / 10.0f;
+        target_center_y = y / 10.0f;
+        target_radius   = extra / 10.0f;
+        break;
+    case CMD_LOST:
+        gimbal_scan();  // 扫描搜索
+        break;
+    }
+}
+```
+
+### K230 电赛常用 API 快速索引
+
+| 电赛需求 | API 调用 |
+|----------|----------|
+| 红色光斑位置 | `find_blobs([(30,100,15,127,0,127)])` |
+| 靶心红圆 | `find_circles(threshold=2000, r_min=5, r_max=30)` |
+| A4 纸黑框 | `find_rects(threshold=10000)` |
+| 黑线方向 | `get_regression([(0,100,-128,127,-128,127)])` |
+| AprilTag 3D位姿 | `find_apriltags(families=TAG36H11)` |
+| 二维码内容 | `find_qrcodes()` |
+| 十字路口检测 | `find_line_segments()` + 线段角度差 ~90° |
+| YOLO自定义检测 | `YOLOv5(task_type="detect", ...)` |
+| 图像二值化 | `binary([(lo,hi)])` |
+| 直方图均衡化 | `histeq(adaptive=True)` |
+| 光斑轨迹绘制 | `draw_circle()`, `draw_cross()` |
+| 镜头校正 | `lens_corr(strength=1.8)` |
+
+### 三道真题 K230+M0G 分工表
+
+**23年 E — 运动目标追踪：**
+```
+K230:  同时检测红绿两光斑位置 → 计算距离差 → UART发送
+M0G红: 开环走预编路径(正方形/A4)
+M0G绿: 接收K230坐标 → PID追踪红点
+约束:  红绿系统不通信, K230仅作为"裁判"验证
+```
+
+**24年 H — 自动行驶小车：**
+```
+M0G主导: TCRT5000巡线 + 编码器 + PID转向 + 路径规划
+K230辅助(可选):
+  - get_regression() 检测黑线中线,辅助弯道
+  - find_apriltags() 贴在ABCD点,精确定位
+  - 摄像头防止完全跑偏
+```
+
+**25年 E — 简易瞄准装置：**
+```
+M0G主导: 巡线 + 位置推算 + 云台瞄准 + 画圆同步
+K230增强:
+  - find_blobs(RED) 精确检测靶心
+  - 每帧验证激光光斑落点
+  - 画圆: find_circles() 验证光斑沿6cm圆弧
+  - 闭环: K230 → UART偏差 → M0G微调云台
+```
+
+### K230 全功能视觉管道
+
+```python
+"""vision_pipeline.py — 电赛通用视觉管道, 可切换模式"""
+import sensor, image, time, gc
+from machine import UART
+import struct
+
+class VisionPipeline:
+    def __init__(self, mode="blob_red"):
+        self.mode = mode
+        sensor.reset()
+        sensor.set_pixformat(sensor.RGB565)
+        sensor.set_framesize(sensor.QVGA)
+        sensor.run()
+        self.uart = UART(UART.UART2, baudrate=115200)
+        self.clock = time.clock()
+        self.last_blob = None
+
+    def pixel_to_cm(self, px, py):
+        return ((px-160)*50/320, (py-120)*50/240)
+
+    def send(self, cmd, x, y, extra=0):
+        buf = bytearray(10)
+        buf[0]=0xA5; buf[1]=0x5A; buf[2]=cmd
+        struct.pack_into('<h', buf, 3, int(x*10))
+        struct.pack_into('<h', buf, 5, int(y*10))
+        struct.pack_into('<h', buf, 7, int(extra))
+        buf[9] = sum(buf[:9]) & 0xFF ^ 0xFF
+        self.uart.write(buf)
+
+    def run_blob_red(self, img):
+        blobs = img.find_blobs([(30,100,15,127,0,127)],
+                               pixels_threshold=5, merge=True)
+        if blobs:
+            b = blobs[0]
+            img.draw_cross(b.cx(), b.cy(), size=10)
+            sx, sy = self.pixel_to_cm(b.cx(), b.cy())
+            self.send(0x01, sx, sy, len(blobs))
+            self.last_blob = (b.cx(), b.cy())
+        else:
+            self.send(0x04, 0, 0, 0)  # lost
+
+    def run_circles(self, img):
+        circles = img.find_circles(threshold=1800, r_min=5, r_max=35)
+        if circles:
+            c = circles[0]
+            img.draw_circle(c.x(), c.y(), c.r(), color=(255,0,0))
+            sx, sy = self.pixel_to_cm(c.x(), c.y())
+            self.send(0x02, sx, sy, c.r())
+
+    def run_apriltag(self, img):
+        tags = img.find_apriltags(families=image.TAG36H11)
+        for t in tags:
+            img.draw_rectangle(t.rect())
+            self.send(0x02, t.x_translation(), t.y_translation(),
+                      int(t.z_translation()))
+
+    def loop(self):
+        while True:
+            self.clock.tick()
+            img = sensor.snapshot()
+            if self.mode == "blob_red":
+                self.run_blob_red(img)
+            elif self.mode == "circles":
+                self.run_circles(img)
+            elif self.mode == "apriltag":
+                self.run_apriltag(img)
+            if self.clock.fps() > 50:
+                gc.collect()
+
+# 启动
+vp = VisionPipeline(mode="blob_red")
+vp.loop()
+```
+
+### K230 内存与帧率
+
+| 分辨率 | 帧率 | 用途 |
+|--------|------|------|
+| QVGA (320x240) | 90fps | 光斑追踪 |
+| VGA (640x480) | 30fps | 靶心检测 |
+| HD (1280x720) | 30fps | YOLO推理输入 |
+
+### 视觉方案选择决策树
+
+```
+需要检测什么?
+├─ 红/绿激光光斑 → find_blobs(LAB阈值)
+├─ 靶心红色圆环  → find_circles() 或 find_blobs
+├─ 黑线方向      → get_regression()
+├─ A4纸/矩形标记 → find_rects()
+├─ 需要3D位姿    → find_apriltags() (贴AprilTag)
+├─ 二维码信息    → find_qrcodes()
+├─ 自定义物体    → YOLO训练 + kmodel部署
+└─ 光斑轨迹验证  → find_circles() + draw操作
+
+精度: AprilTag > find_circles > find_blobs
+速度: find_blobs > find_circles > AprilTag
+```
+
+### K230 视觉常见坑
+
+| # | 问题 | 解决 |
+|---|------|------|
+| 1 | **LAB阈值不准** | 必须在场地灯光下重校准, 自然光/日光灯/LED 差异巨大 |
+| 2 | **QVGA够用** | 追踪不需要高分辨率, QVGA 90fps 远好于 VGA 30fps |
+| 3 | **GC导致帧间隔抖动** | `if fps>50: gc.collect()`, 避免每帧都 GC |
+| 4 | **uart.write阻塞** | 10字节帧协议, 115200波特率 ≈ 1ms发送, 不阻塞 |
+| 5 | **blob合并误判** | 设 `merge=True` 时注意 `margin` 参数, 两光斑靠近时可能合并 |
+| 6 | **MMZ内存耗尽** | 大Image用 `alloc=image.ALLOC_MMZ`, 用完 `del` |
+| 7 | **Sensor未stop** | 多 Sensor 每个都要单独 stop |
+| 8 | **Display bind_layer顺序** | 必须先 bind_layer 再 init |
