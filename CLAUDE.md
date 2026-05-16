@@ -2440,3 +2440,261 @@ pl.destroy()
 | 8 | **Display** | `bind_layer()` 必须在 `init()` 之前调用，顺序要求容易出错 |
 | 9 | **uctypes** | 位域定义语法 `offset \| type \| lsbit<<BF_POS \| bitsize<<BF_LEN` 极易写错，无误用保护 |
 
+---
+
+## 十四、K230 + MSPM0G 双芯电赛完整方案
+
+### 架构总览
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    K230 (视觉大脑)                     │
+│  Sensor → Image → find_blobs/circles/apriltags       │
+│  → 坐标计算 → UART 发送                              │
+│  功耗: 3W, 独立电池                                   │
+└────────────────────┬─────────────────────────────────┘
+                     │ UART (115200, 帧协议)
+┌────────────────────┴─────────────────────────────────┐
+│                   MSPM0G (运动小脑)                    │
+│  接收坐标 → PID 控制 → 电机/舵机执行                   │
+│  功耗: 0.1W, 独立电池                                 │
+└──────────────────────────────────────────────────────┘
+```
+
+### K230 视觉竞赛速查
+
+```python
+# === 红光斑检测 (23年E题核心) ===
+import sensor, image, time, gc
+from machine import UART
+import struct
+
+uart = UART(UART.UART2, baudrate=115200)
+
+sensor.reset()
+sensor.set_pixformat(sensor.RGB565)
+sensor.set_framesize(sensor.QVGA)  # 320x240
+sensor.run()
+
+# LAB红色阈值: (L_min, L_max, A_min, A_max, B_min, B_max)
+# 现场用 IDE 阈值编辑器校准！以下为参考值
+RED_THRESHOLD   = [(30, 100, 15, 127, 0, 127)]
+GREEN_THRESHOLD = [(30, 100, -128, -15, 0, 127)]
+
+def pixel_to_screen(px, py, img_w=320, img_h=240, screen_w=50, screen_h=50):
+    """像素坐标 → 屏幕坐标(cm), 原点屏幕中心"""
+    return ((px - img_w/2) * screen_w / img_w,
+            (py - img_h/2) * screen_h / img_h)
+
+while True:
+    img = sensor.snapshot()
+    blobs = img.find_blobs(RED_THRESHOLD, pixels_threshold=5,
+                           area_threshold=10, merge=True)
+    if blobs:
+        b = blobs[0]
+        img.draw_cross(b.cx(), b.cy(), color=(0,255,0), size=10)
+        sx, sy = pixel_to_screen(b.cx(), b.cy())
+        # UART 发给 M0G
+        buf = bytearray(10)
+        buf[0]=0xA5; buf[1]=0x5A; buf[2]=0x01
+        struct.pack_into('<h', buf, 3, int(sx*10))
+        struct.pack_into('<h', buf, 5, int(sy*10))
+        struct.pack_into('<h', buf, 7, len(blobs))
+        buf[9] = sum(buf[:9]) & 0xFF ^ 0xFF
+        uart.write(buf)
+    gc.collect()
+```
+
+### 双芯通信帧协议 (10字节定长)
+
+```
+| 0xA5 | 0x5A | CMD | X(2B) | Y(2B) | EXTRA(2B) | CHKSUM |
+  帧头   帧头   命令   坐标    坐标    附加数据     校验(=前9B异或)
+```
+
+```c
+// === M0G 端接收 ===
+// CMD定义:
+#define CMD_BLOB_POS   0x01  // 光斑坐标, X/Y单位0.1mm
+#define CMD_CIRCLE     0x02  // 圆检测, EXTRA=半径(cm*10)
+#define CMD_PHASE      0x03  // 画圆相位, EXTRA=0~359度
+#define CMD_LOST       0x04  // 目标丢失
+#define CMD_STOP       0xFF  // 急停
+
+void handle_vision_frame(uint8_t cmd, int16_t x, int16_t y, int16_t extra) {
+    switch (cmd) {
+    case CMD_BLOB_POS:
+        target_x_cm = x / 10.0f;
+        target_y_cm = y / 10.0f;
+        break;
+    case CMD_CIRCLE:
+        target_center_x = x / 10.0f;
+        target_center_y = y / 10.0f;
+        target_radius   = extra / 10.0f;
+        break;
+    case CMD_LOST:
+        gimbal_scan();  // 扫描搜索
+        break;
+    }
+}
+```
+
+### K230 电赛常用 API 快速索引
+
+| 电赛需求 | API 调用 |
+|----------|----------|
+| 红色光斑位置 | `find_blobs([(30,100,15,127,0,127)])` |
+| 靶心红圆 | `find_circles(threshold=2000, r_min=5, r_max=30)` |
+| A4 纸黑框 | `find_rects(threshold=10000)` |
+| 黑线方向 | `get_regression([(0,100,-128,127,-128,127)])` |
+| AprilTag 3D位姿 | `find_apriltags(families=TAG36H11)` |
+| 二维码内容 | `find_qrcodes()` |
+| 十字路口检测 | `find_line_segments()` + 线段角度差 ~90° |
+| YOLO自定义检测 | `YOLOv5(task_type="detect", ...)` |
+| 图像二值化 | `binary([(lo,hi)])` |
+| 直方图均衡化 | `histeq(adaptive=True)` |
+| 光斑轨迹绘制 | `draw_circle()`, `draw_cross()` |
+| 镜头校正 | `lens_corr(strength=1.8)` |
+
+### 三道真题 K230+M0G 分工表
+
+**23年 E — 运动目标追踪：**
+```
+K230:  同时检测红绿两光斑位置 → 计算距离差 → UART发送
+M0G红: 开环走预编路径(正方形/A4)
+M0G绿: 接收K230坐标 → PID追踪红点
+约束:  红绿系统不通信, K230仅作为"裁判"验证
+```
+
+**24年 H — 自动行驶小车：**
+```
+M0G主导: TCRT5000巡线 + 编码器 + PID转向 + 路径规划
+K230辅助(可选):
+  - get_regression() 检测黑线中线,辅助弯道
+  - find_apriltags() 贴在ABCD点,精确定位
+  - 摄像头防止完全跑偏
+```
+
+**25年 E — 简易瞄准装置：**
+```
+M0G主导: 巡线 + 位置推算 + 云台瞄准 + 画圆同步
+K230增强:
+  - find_blobs(RED) 精确检测靶心
+  - 每帧验证激光光斑落点
+  - 画圆: find_circles() 验证光斑沿6cm圆弧
+  - 闭环: K230 → UART偏差 → M0G微调云台
+```
+
+### K230 全功能视觉管道
+
+```python
+"""vision_pipeline.py — 电赛通用视觉管道, 可切换模式"""
+import sensor, image, time, gc
+from machine import UART
+import struct
+
+class VisionPipeline:
+    def __init__(self, mode="blob_red"):
+        self.mode = mode
+        sensor.reset()
+        sensor.set_pixformat(sensor.RGB565)
+        sensor.set_framesize(sensor.QVGA)
+        sensor.run()
+        self.uart = UART(UART.UART2, baudrate=115200)
+        self.clock = time.clock()
+        self.last_blob = None
+
+    def pixel_to_cm(self, px, py):
+        return ((px-160)*50/320, (py-120)*50/240)
+
+    def send(self, cmd, x, y, extra=0):
+        buf = bytearray(10)
+        buf[0]=0xA5; buf[1]=0x5A; buf[2]=cmd
+        struct.pack_into('<h', buf, 3, int(x*10))
+        struct.pack_into('<h', buf, 5, int(y*10))
+        struct.pack_into('<h', buf, 7, int(extra))
+        buf[9] = sum(buf[:9]) & 0xFF ^ 0xFF
+        self.uart.write(buf)
+
+    def run_blob_red(self, img):
+        blobs = img.find_blobs([(30,100,15,127,0,127)],
+                               pixels_threshold=5, merge=True)
+        if blobs:
+            b = blobs[0]
+            img.draw_cross(b.cx(), b.cy(), size=10)
+            sx, sy = self.pixel_to_cm(b.cx(), b.cy())
+            self.send(0x01, sx, sy, len(blobs))
+            self.last_blob = (b.cx(), b.cy())
+        else:
+            self.send(0x04, 0, 0, 0)  # lost
+
+    def run_circles(self, img):
+        circles = img.find_circles(threshold=1800, r_min=5, r_max=35)
+        if circles:
+            c = circles[0]
+            img.draw_circle(c.x(), c.y(), c.r(), color=(255,0,0))
+            sx, sy = self.pixel_to_cm(c.x(), c.y())
+            self.send(0x02, sx, sy, c.r())
+
+    def run_apriltag(self, img):
+        tags = img.find_apriltags(families=image.TAG36H11)
+        for t in tags:
+            img.draw_rectangle(t.rect())
+            self.send(0x02, t.x_translation(), t.y_translation(),
+                      int(t.z_translation()))
+
+    def loop(self):
+        while True:
+            self.clock.tick()
+            img = sensor.snapshot()
+            if self.mode == "blob_red":
+                self.run_blob_red(img)
+            elif self.mode == "circles":
+                self.run_circles(img)
+            elif self.mode == "apriltag":
+                self.run_apriltag(img)
+            if self.clock.fps() > 50:
+                gc.collect()
+
+# 启动
+vp = VisionPipeline(mode="blob_red")
+vp.loop()
+```
+
+### K230 内存与帧率
+
+| 分辨率 | 帧率 | 用途 |
+|--------|------|------|
+| QVGA (320x240) | 90fps | 光斑追踪 |
+| VGA (640x480) | 30fps | 靶心检测 |
+| HD (1280x720) | 30fps | YOLO推理输入 |
+
+### 视觉方案选择决策树
+
+```
+需要检测什么?
+├─ 红/绿激光光斑 → find_blobs(LAB阈值)
+├─ 靶心红色圆环  → find_circles() 或 find_blobs
+├─ 黑线方向      → get_regression()
+├─ A4纸/矩形标记 → find_rects()
+├─ 需要3D位姿    → find_apriltags() (贴AprilTag)
+├─ 二维码信息    → find_qrcodes()
+├─ 自定义物体    → YOLO训练 + kmodel部署
+└─ 光斑轨迹验证  → find_circles() + draw操作
+
+精度: AprilTag > find_circles > find_blobs
+速度: find_blobs > find_circles > AprilTag
+```
+
+### K230 视觉常见坑
+
+| # | 问题 | 解决 |
+|---|------|------|
+| 1 | **LAB阈值不准** | 必须在场地灯光下重校准, 自然光/日光灯/LED 差异巨大 |
+| 2 | **QVGA够用** | 追踪不需要高分辨率, QVGA 90fps 远好于 VGA 30fps |
+| 3 | **GC导致帧间隔抖动** | `if fps>50: gc.collect()`, 避免每帧都 GC |
+| 4 | **uart.write阻塞** | 10字节帧协议, 115200波特率 ≈ 1ms发送, 不阻塞 |
+| 5 | **blob合并误判** | 设 `merge=True` 时注意 `margin` 参数, 两光斑靠近时可能合并 |
+| 6 | **MMZ内存耗尽** | 大Image用 `alloc=image.ALLOC_MMZ`, 用完 `del` |
+| 7 | **Sensor未stop** | 多 Sensor 每个都要单独 stop |
+| 8 | **Display bind_layer顺序** | 必须先 bind_layer 再 init |
