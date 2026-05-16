@@ -26,16 +26,63 @@
 | 供电 | 1.62V ~ 3.6V |
 | 封装 | LQFP48 / LQFP64 / VQFN32 |
 
-### 常用引脚映射 (LQFP48)
-| 外设功能 | 默认引脚 | 备注 |
-|----------|----------|------|
-| SWCLK | PA0 | 调试时钟 |
-| SWDIO | PA1 | 调试数据 |
-| UART0 TX/RX | PA10/PA11 | 调试串口 |
-| I2C0 SDA/SCL | PA8/PA9 | OLED 等 |
-| SPI0 PICO/POCI/SCK/CS0 | PB6/PB7/PB4/PB5 | SPI 外设 |
-| TIMA0 PWM | PB0~PB3 | 电机 PWM |
-| ADC0 A0~A7 | 见数据手册 | 模拟输入 |
+### 天猛星引脚映射 (LQFP64, 80Pin引出)
+
+**⚠️ 天猛星为 64Pin LQFP 封装，非 48Pin。以下均为实际板载引脚。**
+
+| 类别 | 引脚 | 片上复用功能 | 天猛星用途 |
+|------|------|-------------|-----------|
+| **调试** | PA20 | SWCLK | SWD 调试时钟 |
+| | PA19 | SWDIO | SWD 调试数据 |
+| **串口(CH340)** | PA0 | UART0_TX / I2C0_SDA / TIMA0_C0 | 板载 CH340 → PC |
+| | PA1 | UART0_RX / I2C0_SCL / TIMA0_C1 | 板载 CH340 → PC |
+| **I2C0** | PA12 | I2C0_SDA / UART2_TX / TIMG8_C1 | OLED/MPU6050 SDA |
+| | PA13 | I2C0_SCL / UART2_RX / TIMG8_C0 | OLED/MPU6050 SCL |
+| **SPI0** | PB4 | SPI0_SCK | TFT / SPI 外设 SCK |
+| | PB6 | SPI0_PICO (MOSI) | TFT / SPI 外设 MOSI |
+| | PB7 | SPI0_POCI (MISO) | TFT / SPI 外设 MISO |
+| | PB5 | SPI0_CS0 | TFT / SPI 外设 CS |
+| **TIMA0 PWM** | PB0~PB3 | TIMA0_C0~C3 | 电机驱动 4路PWM |
+| **TIMA1 PWM** | PA8~PA11 | TIMA1_C0~C3 | 舵机/辅助PWM |
+| **ADC** | PA24~PA31 | ADC12 通道 | 传感器模拟采集 |
+| | PA26/PA27 | ADC+GPIO 双功能 | **培训案例默认用这对** |
+| **GPIO(常用)** | PA7 | UART3_TX / I2C1_SCL / TIMA0_C3 | 继电器/通用输出 |
+| | PA14 | I2C1_SCL | 辅助 I2C |
+| | PA15 | I2C1_SDA | 辅助 I2C |
+| | PA18 | UART2_TX / I2C1_SDA | 辅助串口 |
+| **时钟(禁用)** | PA2~PA6 | ROSC/LFXIN/HFXIN | **默认未焊接，勿用** |
+| **复位** | NRST | RST | 复位按键 |
+
+### 外设推荐引脚组合
+
+```c
+// === 竞赛常用引脚分配 ===
+
+// 调试串口 (CH340, 固定不可改)
+// PA0 = UART0_TX, PA1 = UART0_RX
+
+// 电机 PWM (TB6612) — TIMA0
+// PB0 = PWMA, PB1 = PWMB
+// 方向: PA7(AIN1), PA14(AIN2), PA15(BIN1), PA18(BIN2)
+
+// 编码器 — TIMG (AB相)
+// PB2 = A相, PB3 = B相
+
+// OLED + MPU6050 — I2C0
+// PA12 = SDA, PA13 = SCL
+
+// TCRT5000 循迹 — ADC
+// PA24=左1, PA25=左2, PA26=中, PA27=右2, PA28=右1 (5路)
+
+// 舵机 — TIMA1
+// PA8 = Pan, PA9 = Tilt
+
+// EC11 旋转编码器
+// PA16 = A相, PA17 = B相, PA14 = 按键
+
+// 激光笔 / 蜂鸣器
+// PA10 = 激光MOS, PA11 = 蜂鸣器
+```
 
 ---
 
@@ -47,41 +94,37 @@
 
 **数字输出 (LED/继电器)：**
 ```c
+// ⚠️ 天猛星: PA2~PA6 为时钟引脚, PA0/PA1 被 CH340 占用, 请用 PA7/PA14/PA15 等
 #include "ti_msp_dl_config.h"
 
 void gpio_output_init(void) {
-    // 假设 SysConfig 中已配置 PA2 为输出
-    // 手动裸写方式:
-    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_2, DL_GPIO_OUTPUT);
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_2);  // 初始低电平
+    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_7, DL_GPIO_OUTPUT);
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);  // 初始低电平
 }
 
-// 使用宏操作（更快）：
-#define LED_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_2)
-#define LED_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_2)
-#define LED_TOGGLE() DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_2)
+#define LED_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7)
+#define LED_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7)
+#define LED_TOGGLE() DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_7)
 ```
 
 **数字输入 (按键)：**
 ```c
 void gpio_input_init(void) {
-    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_3, DL_GPIO_INPUT);
-    DL_GPIO_setInternalResistor(GPIOA, DL_GPIO_PIN_3, DL_GPIO_RESISTOR_PULL_UP);
-    // SysConfig 中可启用中断，生成 GROUP1_IRQHandler
+    // PA14 = 按键, 内部上拉
+    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_14, DL_GPIO_INPUT);
+    DL_GPIO_setInternalResistor(GPIOA, DL_GPIO_PIN_14, DL_GPIO_RESISTOR_PULL_UP);
 }
 
-// 读取按键状态：
-uint32_t key_state = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_3);
+uint32_t key_state = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14);
 ```
 
 **GPIO 中断 (按键触发)：**
 ```c
 void GROUP1_IRQHandler(void) {
-    // 读取中断状态
-    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_3);
-    if (status & DL_GPIO_PIN_3) {
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_3);
-        // 处理按键事件 — 消抖、置标志位
+    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_14);
+    if (status & DL_GPIO_PIN_14) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_14);
+        // 处理按键事件 — 置标志位
     }
 }
 ```
@@ -201,7 +244,7 @@ int fputc(int ch, FILE *f) {
     return ch;
 }
 
-// SysConfig: UART0 → 115200-8-N-1
+// SysConfig: UART0(PA0=TX,PA1=RX, 板载CH340) → 115200-8-N-1
 void uart_init(void) {
     // SysConfig 自动生成完整初始化
 }
@@ -220,7 +263,7 @@ void UART0_INST_IRQHandler(void) {
 #define OLED_ADDR 0x3C
 
 void i2c_init(void) {
-    // SysConfig: I2C0 → 主机模式 → 400kHz (Fast Mode)
+    // SysConfig: I2C0(PA12=SDA,PA13=SCL) → 主机模式 → 400kHz (Fast Mode)
     DL_I2C_setPeripheralMode(I2C0, DL_I2C_PERIPHERAL_MODE_CONTROLLER);
 }
 
@@ -254,7 +297,7 @@ void spi_transfer(uint8_t *tx, uint8_t *rx, uint16_t len) {
 
 ```c
 // SysConfig: TIMG2 → Input Capture 模式 → 一个引脚做 TRIG (GPIO), 一个做 ECHO (捕获)
-#define TRIG_PIN  DL_GPIO_PIN_4  // PA4
+#define TRIG_PIN  DL_GPIO_PIN_15  // PA15 (PA4为时钟引脚,不能用)
 #define TRIG_PORT GPIOA
 
 volatile uint32_t echo_start = 0;
@@ -920,12 +963,12 @@ void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
 **TB6612 电机驱动：**
 | TB6612 | MSPM0G | 说明 |
 |--------|--------|------|
-| PWMA | PB0 (TIMA0_C0) | PWM |
-| AIN1 | PA2 | 方向 1 |
-| AIN2 | PA3 | 方向 2 |
-| PWMB | PB1 (TIMA0_C1) | PWM |
-| BIN1 | PA4 | 方向 1 |
-| BIN2 | PA5 | 方向 2 |
+| PWMA | PB0 (TIMA0_C0) | PWM, 20kHz |
+| AIN1 | PA7 | 方向 1 |
+| AIN2 | PA14 | 方向 2 |
+| PWMB | PB1 (TIMA0_C1) | PWM, 20kHz |
+| BIN1 | PA15 | 方向 1 |
+| BIN2 | PA18 | 方向 2 |
 | STBY | 3.3V | 使能 |
 | VM | 电池+ (7~12V) | 电机电源 |
 | VCC | 3.3V | 逻辑电源 |
@@ -933,24 +976,24 @@ void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
 **MPU6050 (I2C 陀螺仪+加速度计)：**
 | MPU6050 | MSPM0G |
 |---------|--------|
-| SDA | PA8 (I2C0_SDA) |
-| SCL | PA9 (I2C0_SCL) |
+| SDA | PA12 (I2C0_SDA) |
+| SCL | PA13 (I2C0_SCL) |
 | VCC | 3.3V |
 | AD0 | GND (地址 0x68) |
 
 **0.96" OLED SSD1306 (I2C)：**
 | OLED | MSPM0G |
 |------|--------|
-| SDA | PA8 (I2C0_SDA) |
-| SCL | PA9 (I2C0_SCL) |
+| SDA | PA12 (I2C0_SDA) |
+| SCL | PA13 (I2C0_SCL) |
 | VCC | 3.3V |
 | 地址 | 0x3C |
 
 **HC-05 蓝牙模块 (UART)：**
 | HC-05 | MSPM0G |
 |-------|--------|
-| TX | PA11 (UART0_RX) |
-| RX | PA10 (UART0_TX) |
+| TX | PA1 (UART0_RX) |
+| RX | PA0 (UART0_TX) |
 | VCC | 5V 或 3.3V |
 
 **AMS1117-3.3 LDO 供电方案：**
@@ -1146,13 +1189,15 @@ void button_update(Button *btn, bool pressed) {
 ## 八、注意事项
 
 - MSPM0G 是 3.3V 系统，GPIO 不可直接接 5V（部分引脚可耐受 5V，查看数据手册）
+- **天猛星 PA2~PA6 为时钟引脚，默认未焊接，勿用！** PA0/PA1 被 CH340 固定占用
+- **SWCLK=PA20, SWDIO=PA19**（非 PA0/PA1）
 - ADC 输入电压范围 0 ~ VREF，超出会损坏
 - 使用内部运放前必须先使能，使用后及时禁用省电
 - 中断回调函数中不要做耗时操作，只置标志位
 - PWM 死区用于 H 桥，避免上下管直通短路
-- I2C 必须加上拉电阻 (4.7kΩ to 3.3V)
+- I2C 默认使用 PA12(SDA)+PA13(SCL)，板载已有上拉可不再加
 - 电机编码器线长尽量短，必要时加屏蔽
-- 用户即将提供数据手册 PDF，届时可根据精确参数更新代码
+- 双 K230+M0G 系统必须共地，供电独立隔离
 
 ---
 
@@ -2512,8 +2557,8 @@ pl.destroy()
 **双芯硬件连接：**
 | K230 (庐山派) | MSPM0G (天猛星) | 说明 |
 |---------------|-----------------|------|
-| GPIO11 (UART2_TXD) | PA10 (UART0_RX) | 视觉→控制 数据 |
-| GPIO12 (UART2_RXD) | PA11 (UART0_TX) | 可选ACK回传 |
+| GPIO11 (UART2_TXD) | PA1 (UART0_RX) | 视觉→控制 数据 |
+| GPIO12 (UART2_RXD) | PA0 (UART0_TX) | 可选ACK回传 |
 | GND | GND | 必须共地 |
 | 独立电池 5V | 独立电池 7.4V | 供电隔离 |
 
