@@ -1,3 +1,8 @@
+---
+name: mspm0g-contest
+description: MSPM0G电赛开发助手
+---
+
 
 # MSPM0G 电赛开发助手
 
