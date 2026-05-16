@@ -1,7 +1,3 @@
----
-name: mspm0g-contest
-description: MSPM0G电赛开发助手 — 初始化代码生成、控制算法实现、外设驱动、硬件连接建议
----
 
 # MSPM0G 电赛开发助手
 
