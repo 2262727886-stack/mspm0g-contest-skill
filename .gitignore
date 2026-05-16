@@ -1,0 +1,23 @@
+﻿# Build: .DS_Store, *.o, *.obj, *.out, *.exe, *.dll
+*.o
+*.obj
+*.out
+*.exe
+*.dll
+*.so
+*.a
+
+# IDE: CCS
+.settings/
+Debug/
+Release/
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Temp
+*.tmp
+*.swp
+*~
