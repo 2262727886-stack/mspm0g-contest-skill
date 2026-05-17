@@ -3680,3 +3680,246 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
 - **SysConfig 默认 32MHz**: 不用 PLL 时 SysTick 配 32000 非 80000
 - **I2C 死等**: 从设备不响应时加超时 + STOP 恢复
 - **K230 UART 先 FPIOA**: `set_function(11, UART2_TXD)` 再 `UART(...)`
+
+
+---
+
+## 二十二、看门狗 WDT 配置
+
+### 概述
+
+看门狗定时器 (WDT) 是一个独立运行的递减计数器，主程序必须周期"喂狗"。如果在设定时间内没有喂狗，WDT 会触发系统复位。这是电赛控制题**最低成本的安全保障**——程序卡死时自动重启，避免小车失控。
+
+### SysConfig 配置
+
+```
+1. 点 "ADD" → 搜索 "WDT" → 选 "Watchdog Timer"
+2. 配置:
+   Clock Source:  LFOSC (32.768kHz, 低功耗独立时钟)
+   Period:        1 second (1 秒窗口)
+   Window:        No window (简单模式)
+3. 保存
+```
+
+### 基础代码
+
+```c
+#include "ti_msp_dl_config.h"
+
+int main(void)
+{
+    SYSCFG_DL_init();
+
+    /* WDT 使能 (SysConfig 自动生成 DL_WDT_enable) */
+    /* ⚠️ 使能后必须按时喂狗, 否则 1 秒后复位 */
+    printf("System boot, WDT enabled\r\n");
+
+    while (1)
+    {
+        /* === 控制循环 === */
+        read_sensors();
+        pid_control();
+        motor_output();
+
+        /* === 喂狗 (必须放在主循环能到达的地方) === */
+        DL_WDT_feed(WDT);
+        /* 如果上面任何一步卡死 > 1 秒 → 自动复位 */
+    }
+}
+```
+
+### 中断里喂狗 (错误示范)
+
+```c
+/* ❌ 危险! 中断里喂狗是假安全 */
+void SysTick_Handler(void) {
+    DL_WDT_feed(WDT);  // 中断还在跑但主循环卡死了!
+}
+/* 正确: 必须在主循环喂狗, 中断只负责置标志 */
+```
+
+### 关键 API
+
+| 函数 | 作用 |
+|------|------|
+| `DL_WDT_setPeriod(WDT, period)` | 设置超时周期 |
+| `DL_WDT_enable(WDT)` | 使能看门狗 |
+| `DL_WDT_feed(WDT)` | 清零计数器 (喂狗) |
+| `DL_WDT_getCount(WDT)` | 读当前计数值 (调试用) |
+
+### 周期选项
+
+| 宏 | 大致时间 | 适用场景 |
+|----|---------|----------|
+| `DL_WDT_PERIOD_100MS` | 100ms | 高速控制, 喂狗频繁 |
+| `DL_WDT_PERIOD_500MS` | 500ms | 一般控制 |
+| `DL_WDT_PERIOD_1S` | **1 秒** | 推荐, 容忍短暂阻塞 |
+| `DL_WDT_PERIOD_2S` | 2 秒 | 宽松, 适合慢速循环 |
+| `DL_WDT_PERIOD_5S` | 5 秒 | 宽松, 适合 OLED 刷新 |
+
+### 复位原因检测
+
+```c
+/* 启动时检查是否 WDT 触发过复位 */
+if (DL_SYSCTL_getResetCause() & DL_SYSCTL_RESET_CAUSE_WDT) {
+    printf("上次复位原因: 看门狗超时!\r\n");
+    // 可能是程序卡死, 记录错误方便排查
+    DL_SYSCTL_clearResetCause(DL_SYSCTL_RESET_CAUSE_WDT);
+}
+```
+
+---
+
+## 二十三、Flash 参数存储 (校准值持久化)
+
+### 概述
+
+TCRT5000 黑白阈值、PID 参数、编码器偏移这些值在断电后会丢失。MSPM0G3507 的 Flash 可以在**运行时**写入指定扇区实现持久化存储。
+
+### Flash 布局
+
+```
+MSPM0G3507 Flash: 128KB
+┌─────────────────────────────┐ 0x0000_0000
+│  用户程序 (~100KB)           │
+│  .text, .rodata, .data ...  │
+├─────────────────────────────┤ 0x0001_9000  ← 程序结束地址
+│  空闲空间                     │
+├─────────────────────────────┤ 0x0001_F000  ← 用来存参数
+│  参数存储扇区 (4KB)           │  最后一个扇区
+└─────────────────────────────┘ 0x0002_0000
+```
+
+### 参数结构体 + 读写代码
+
+```c
+#include "ti_msp_dl_config.h"
+
+/* 参数存储的 Flash 起始地址 (最后一个扇区, 避开程序区) */
+#define PARAM_FLASH_ADDR   0x0001F000
+#define PARAM_FLASH_SIZE   2048  /* 实际使用 2KB */
+
+/* 参数结构体 (对齐到 4 字节) */
+typedef struct __attribute__((aligned(4))) {
+    uint32_t magic;           /* 魔数: 0xAA55_EE11 表示数据有效 */
+    uint32_t version;         /* 版本号, 结构体改了就 +1 */
+    /* ---- TCRT5000 校准 ---- */
+    uint16_t tcrt_min[5];     /* 白底最小值 */
+    uint16_t tcrt_max[5];     /* 黑线最大值 */
+    /* ---- PID 参数 ---- */
+    float    pid_kp;
+    float    pid_ki;
+    float    pid_kd;
+    float    base_speed;
+    /* ---- 编码器偏移 ---- */
+    int32_t  encoder_offset;
+    /* ---- 校验 ---- */
+    uint32_t crc32;           /* 整个结构体的 CRC32 */
+} PersistentParams;
+
+static PersistentParams g_params;
+
+/* ---- Flash 扇区擦除 ---- */
+void flash_erase_params(void) {
+    DL_FlashCTL_unprotectSector(
+        DL_FLASHCTL_MAIN_SECTOR_31,  /* 最后一个扇区 */
+        DL_FLASHCTL_READ_WRITE_PERMISSION);
+    DL_FlashCTL_eraseSector(DL_FLASHCTL_MAIN_SECTOR_31);
+}
+
+/* ---- 写入参数到 Flash ---- */
+void flash_save_params(void) {
+    /* 计算 CRC32 (简化校验和) */
+    uint32_t checksum = 0;
+    uint32_t *p = (uint32_t *)&g_params;
+    for (int i = 0; i < sizeof(g_params) / 4 - 1; i++) {
+        checksum ^= p[i];
+    }
+    g_params.crc32 = checksum;
+
+    flash_erase_params();
+
+    /* ⚠️ 按 4 字节对齐写入 (MSPM0 Flash 编程要求) */
+    DL_FlashCTL_programMemory(PARAM_FLASH_ADDR,
+                              (uint32_t *)&g_params,
+                              sizeof(g_params));
+}
+
+/* ---- 从 Flash 读取参数 ---- */
+bool flash_load_params(void) {
+    PersistentParams *stored = (PersistentParams *)PARAM_FLASH_ADDR;
+
+    /* 检查魔数 */
+    if (stored->magic != 0xAA55EE11) {
+        printf("Flash 参数未初始化, 使用默认值\r\n");
+        return false;
+    }
+
+    /* 检查 CRC */
+    uint32_t checksum = 0;
+    uint32_t *p = (uint32_t *)stored;
+    for (int i = 0; i < sizeof(PersistentParams) / 4 - 1; i++) {
+        checksum ^= p[i];
+    }
+    if (checksum != stored->crc32) {
+        printf("Flash 参数 CRC 错误, 使用默认值\r\n");
+        return false;
+    }
+
+    /* 加载 */
+    memcpy(&g_params, stored, sizeof(PersistentParams));
+    printf("Flash 参数加载成功\r\n");
+    return true;
+}
+
+/* ---- 初始化默认参数 ---- */
+void params_init_default(void) {
+    g_params.magic   = 0xAA55EE11;
+    g_params.version = 1;
+    memset(g_params.tcrt_min, 0, sizeof(g_params.tcrt_min));
+    memset(g_params.tcrt_max, 0, sizeof(g_params.tcrt_max));
+    g_params.pid_kp  = 2.0f;
+    g_params.pid_ki  = 0.1f;
+    g_params.pid_kd  = 0.05f;
+    g_params.base_speed = 0.5f;
+    g_params.encoder_offset = 0;
+}
+
+/* ---- 主程序使用 ---- */
+int main(void)
+{
+    SYSCFG_DL_init();
+    __enable_irq();
+
+    params_init_default();
+    /* 尝试从 Flash 加载, 成功则覆盖默认值 */
+    flash_load_params();
+
+    printf("PID: Kp=%.2f Ki=%.3f Kd=%.3f\r\n",
+           g_params.pid_kp, g_params.pid_ki, g_params.pid_kd);
+
+    /* 运行时修改参数后保存 */
+    g_params.pid_kp = 3.5f;   /* 调好参数 */
+    flash_save_params();       /* 永久保存 */
+    printf("参数已保存到 Flash\r\n");
+    /* 下次上电自动加载 */
+}
+```
+
+### 关键 API
+
+| 函数 | 作用 |
+|------|------|
+| `DL_FlashCTL_unprotectSector(sector, perm)` | 解锁扇区写保护 |
+| `DL_FlashCTL_eraseSector(sector)` | 擦除扇区 (写前必须擦) |
+| `DL_FlashCTL_programMemory(addr, data, len)` | 写入 Flash (4 字节对齐) |
+
+### 注意事项
+
+| 问题 | 解决 |
+|------|------|
+| **Flash 写前必须擦除** | 整个扇区一次擦除 (~20ms), 所以先读到 RAM 改完再回写 |
+| **4 字节对齐** | 写入地址和数据长度必须是 4 的倍数 |
+| **擦写寿命** | ~10 万次, 不要每帧都写 (只在"保存"按钮按下时写) |
+| **写期间不能中断** | Flash 写操作时 CPU 暂停, 不要在 PWM 中断里写 |
+| **扇区选择** | 用最后一个扇区, 确保不覆盖程序代码 |
