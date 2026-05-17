@@ -1231,6 +1231,7 @@ void button_update(Button *btn, bool pressed) {
 
 - MSPM0G 是 3.3V 系统，GPIO 不可直接接 5V（部分引脚可耐受 5V，查看数据手册）
 - **天猛星 PA2~PA6 为时钟引脚，默认未焊接，勿用！** PA0/PA1 被 CH340 固定占用
+- **PA0/PA1 是开漏(Open-Drain)引脚**，用作 UART 时必须加外部 4.7kΩ~10kΩ 上拉电阻到 3.3V，否则 115200 波特率下无法通信（BSL 9600 勉强可用但也不稳定）
 - **SWCLK=PA20, SWDIO=PA19**（非 PA0/PA1）
 - ADC 输入电压范围 0 ~ VREF，超出会损坏
 - 使用内部运放前必须先使能，使用后及时禁用省电
@@ -2958,9 +2959,14 @@ vp.loop()
 
 | 方式 | 工具 | 接口 | 速度 | 推荐度 | 文件格式 |
 |------|------|------|------|--------|----------|
+| **XDS110** | TI XDS110 + UniFlash/CCS | SWD (PA19/PA20) | 快 | ⭐⭐⭐ 强烈推荐 | .out |
 | **J-Link** | SEGGER J-Link + UniFlash | SWD (PA19/PA20) | 快 | ⭐⭐⭐ | .out |
-| **XDS110** | TI XDS110 + UniFlash/CCS | SWD (PA19/PA20) | 快 | ⭐⭐⭐ | .out |
-| **串口(BSL)** | UniFlash + 板载CH340 | PA0(TX)/PA1(RX) | 慢 | ⭐ BSL不稳定 | .txt/.hex |
+| **串口(BSL)** | UniFlash + 板载CH340 | PA0(TX)/PA1(RX) | 慢 | ⚠️ 不稳定！程序可能不运行 | .txt/.hex |
+
+**⚠️ BSL 串口烧录已知问题：**
+- 烧录成功但程序可能不执行（多次 CRC 验证失败，即使冷启动也无法运行）
+- PA0/PA1 开漏导致 115200 通信不可靠
+- **强烈建议使用 XDS110，CLI 一键烧录：** `dslite flash --config=xxx.ccxml firmware.out`
 
 ### J-Link 烧录步骤
 
