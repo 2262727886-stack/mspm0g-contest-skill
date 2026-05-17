@@ -2392,6 +2392,22 @@ lcd.fill(color); lcd.pixel(x, y, color)
 lcd.light(50)                  # 背光 0~100
 ```
 
+### ⚠️ 画面分辨率 — 最高优先级
+
+电赛视觉第一要务是**帧率**，不是分辨率。分辨率每提高一档，像素数翻倍，find_rects/find_blobs 耗时倍增。
+
+| 分辨率 | 像素 | 纯采集帧率 | 加检测后帧率 | 推荐用途 |
+|--------|------|-----------|-------------|----------|
+| **QVGA (320×240)** | 7.7万 | ~90fps | **50~70fps** | 光电追踪 / 巡线 / **默认首选** |
+| VGA (640×480) | 30.7万 | ~60fps | 20~30fps | 靶心圆检测 / 精度要求高 |
+| HD (1280×720) | 92万 | ~30fps | 5~10fps | YOLO 推理输入 |
+
+**铁律**：
+1. **默认 320×240**，除非精度不够再升
+2. **严禁高斯模糊等重滤镜**在低帧率下叠加 — 先降分辨率再考虑滤镜
+3. Display 虚拟屏尺寸**独立于采集分辨率**，可以用 640×480 显示但只采集 320×240
+4. 25E 靶面检测 320×240 完全足够：50cm 靶面 / 320px = 1.56mm/px
+
 ### --- Sensor (摄像头) ---
 
 ```python
@@ -2404,12 +2420,14 @@ import os
 # GC2093: 1920×1080, OV5647: 2592×1944. 不要传 id=0 参数!
 sensor = Sensor(width=1920, height=1080)
 sensor.reset()
-# 必须先 set_framesize, 再 set_pixformat
-sensor.set_framesize(width=640, height=480)
+# 电赛默认 QVGA 320×240 → 高帧率优先!
+# 需要精度时改为 width=640, height=480
+sensor.set_framesize(width=320, height=240)
 sensor.set_pixformat(Sensor.RGB565)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
 
+# Display 可以独立于采集分辨率, 640×480 显示更清晰
 Display.init(Display.VIRT, width=640, height=480, to_ide=True)
 
 # ⚠️ MediaManager.init() 必须在 sensor.run() 之前!
@@ -2420,7 +2438,7 @@ sensor.run()
 while True:
     os.exitpoint()
     img = sensor.snapshot(chn=CAM_CHN_ID_0)   # 捕获一帧 → Image
-    Display.show_image(img)                    # 推送到 IDE
+    Display.show_image(img)                    # 推送到 IDE (自动缩放)
 
 # 退出清理
 sensor.stop()
@@ -2437,6 +2455,7 @@ MediaManager.deinit()
 # 3. set_framesize 必须在 set_pixformat 之前
 # 4. 初始化顺序: Display.init → MediaManager.init → sensor.run (不可变)
 # 5. 主循环中必须调用 os.exitpoint() 否则 IDE 无法 Ctrl+C 停止
+# 6. 默认 320×240 高帧率, 不要无谓升分辨率!
 ```
 
 ### --- Display ---
