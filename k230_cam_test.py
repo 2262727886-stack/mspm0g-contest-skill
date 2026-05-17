@@ -5,10 +5,15 @@ QVGA 320×240 采集, 640×480 IDE显示, SSD1306 OLED 状态屏
 from media.sensor import *
 from media.display import *
 from media.media import *
-from machine import I2C
+from machine import I2C, FPIOA
 import time, os, gc
 
-# ===== 一、初始化 (顺序不可变) =====
+# ===== 一、FPIOA: I2C1 配引脚 (必须在 I2C(1) 之前) =====
+fpioa = FPIOA()
+fpioa.set_function(40, FPIOA.I2C1_SCL)
+fpioa.set_function(41, FPIOA.I2C1_SDA)
+
+# ===== 二、摄像头初始化 (顺序不可变) =====
 sensor = Sensor(width=1920, height=1080)
 sensor.reset()
 sensor.set_framesize(width=320, height=240)
@@ -20,7 +25,7 @@ Display.init(Display.VIRT, width=640, height=480, to_ide=True)
 MediaManager.init()
 sensor.run()
 
-# ===== 二、OLED SSD1306 I2C1 (独立总线, 不与GC2093冲突) =====
+# ===== 三、OLED SSD1306 I2C1 (独立总线, 不与GC2093冲突) =====
 OLED_ADDR = 0x3C
 OLED_W = 128; OLED_H = 64; OLED_PAGES = OLED_H // 8
 oled_fb = bytearray(OLED_W * OLED_PAGES)
@@ -107,17 +112,17 @@ def oled_str(x, y, s):
         cx += 6
         if cx > OLED_W - 6: cx = x; cy += 9
 
-# ===== 三、阈值 =====
+# ===== 四、阈值 =====
 TAPE_GRAY  = (0, 109)
 RED_TARGET = [(52,100,24,127,-49,41), (29,73,19,127,-57,89)]
 
-# ===== 四、A4 约束 =====
+# ===== 五、A4 约束 =====
 IW, IH = 320, 240
 A4_AREA_MIN = IW * IH * 0.03
 A4_AREA_MAX = IW * IH * 0.85
 STABLE_FRAMES = 3
 
-# ===== 五、检测状态 =====
+# ===== 六、检测状态 =====
 a4_corners = None; a4_ok = False; a4_stable = 0; a4_last = None
 target_ok = False; target_cx = 0; target_cy = 0
 tx_cm = 0.0; ty_cm = 0.0  # 靶心物理坐标
@@ -157,7 +162,7 @@ def target_in_center(cx, cy, corners, m=0.3):
     mx=m*cw/2; my=m*ch/2; ccx=(min(xs)+max(xs))/2; ccy=(min(ys)+max(ys))/2
     return abs(cx-ccx)<cw/2-mx and abs(cy-ccy)<ch/2-my
 
-# ===== 六、OLED 启动画面 =====
+# ===== 七、OLED 启动画面 =====
 oled_init()
 oled_cls()
 oled_str(0, 0,  "K230 25E Test")
@@ -170,7 +175,7 @@ time.sleep_ms(1000)
 
 print("QVGA 320×240 + OLED, 开始检测...")
 
-# ===== 七、主循环 =====
+# ===== 八、主循环 =====
 try:
     while True:
         os.exitpoint()
