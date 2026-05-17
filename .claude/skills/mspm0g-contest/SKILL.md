@@ -2408,6 +2408,97 @@ lcd.light(50)                  # 背光 0~100
 3. Display 虚拟屏尺寸**独立于采集分辨率**，可以用 640×480 显示但只采集 320×240
 4. 25E 靶面检测 320×240 完全足够：50cm 靶面 / 320px = 1.56mm/px
 
+### ⚠️ K230 代码生成铁律 (防幻觉)
+
+**生成任何 K230 代码前，必须先对照下方「已验证模板」逐行检查：**
+1. 导入必须是 `from media.sensor import *` 等星号导入，禁止 `import sensor`
+2. Sensor 构造不传 `id` 参数
+3. 初始化顺序严格: set_framesize → set_pixformat → Display.init → MediaManager.init → sensor.run
+4. 主循环首行必须是 `os.exitpoint()`
+5. 抓帧必须是 `sensor.snapshot(chn=CAM_CHN_ID_0)`
+6. 禁止编造不存在的 API (如 `sensor.reset()` 不存在，正确是 `sensor = Sensor(...); sensor.reset()`)
+
+### ✅ K230 已验证代码模板
+
+以下模板在 GC2093 + QVGA + A4黑框+红色靶心场景下**实测通过**。**所有后续 K230 代码必须以此模板为蓝本扩展。**
+
+```python
+"""
+K230 代码模板 (已验证) — GC2093 QVGA A4黑框+红色靶心
+所有 K230 代码必须基于此模板, 禁止 AI 幻觉生成
+"""
+from media.sensor import *
+from media.display import *
+from media.media import *
+import time, os, gc
+
+# ===== 一、初始化 (顺序不可变) =====
+sensor = Sensor(width=1920, height=1080)     # 不传 id
+sensor.reset()
+sensor.set_framesize(width=320, height=240)   # 先尺寸(QVGA高帧率)
+sensor.set_pixformat(Sensor.RGB565)            # 后格式
+sensor.set_hmirror(False)
+sensor.set_vflip(False)
+Display.init(Display.VIRT, width=640, height=480, to_ide=True)
+MediaManager.init()
+sensor.run()
+
+# ===== 二、阈值 (现场 IDE 阈值编辑器校准) =====
+TAPE_GRAY  = (0, 109)
+RED_TARGET = [(52,100,24,127,-49,41), (29,73,19,127,-57,89)]
+
+# ===== 三、检测变量 =====
+a4_corners = None; a4_ok = False; a4_stable = 0; a4_last = None
+target_ok = False; target_cx = 0; target_cy = 0
+clock = time.clock(); fc = 0
+IW, IH = 320, 240
+
+print("启动...")
+
+# ===== 四、过滤函数 =====
+def a4_filter_valid(rects):
+    good = []
+    for r in rects:
+        w, h = r.w(), r.h()
+        if w <= 0 or h <= 0: continue
+        ratio = max(w, h) / min(w, h)
+        area = w * h
+        if 1.15 < ratio < 1.80 and IW*IH*0.03 < area < IW*IH*0.85:
+            good.append(r)
+    return good
+
+def corners_near(c1, c2, d=15):
+    if c1 is None or c2 is None: return False
+    for p, q in zip(c1, c2):
+        if abs(p[0]-q[0]) > d or abs(p[1]-q[1]) > d: return False
+    return True
+
+# ===== 五、主循环 =====
+try:
+    while True:
+        os.exitpoint()  # 必须! IDE中断
+        clock.tick(); fc += 1
+        img = sensor.snapshot(chn=CAM_CHN_ID_0)
+
+        # --- A4检测 ---
+        gray = img.to_grayscale(copy=True)
+        bin_img = gray.binary([TAPE_GRAY])
+        bin_img.open(1)
+        rects = a4_filter_valid(bin_img.find_rects(threshold=10000))
+        if rects: ...
+        # (业务逻辑在此扩展)
+
+        Display.show_image(img)
+        if fc % 300 == 0: gc.collect()
+
+except KeyboardInterrupt: print("stop")
+except BaseException as e: print(f"err: {e}")
+finally:
+    sensor.stop(); Display.deinit()
+    os.exitpoint(os.EXITPOINT_ENABLE_SLEEP); time.sleep_ms(100)
+    MediaManager.deinit()
+```
+
 ### --- Sensor (摄像头) ---
 
 ```python
