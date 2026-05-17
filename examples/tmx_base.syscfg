@@ -1,0 +1,83 @@
+/**
+ * 天猛星 MSPM0G3507 基础工程 SysConfig
+ * 生成: Claude Code | 引脚: 官方引脚配置表
+ * 外设: UART0(PA0/PA1) + GPIO(PA7=LED,PA14=KEY) + I2C0(PA28/PA31)
+ *
+ * 使用方法:
+ *   1. CCS → New Project → MSPM0G3507 → Empty Project
+ *   2. 删除自动生成的 .syscfg, 替换为此文件
+ *   3. 保存 → SysConfig 自动加载 → 编译
+ */
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
+
+/* ================================================================
+ *  1. SYSCTL — 时钟配置 (32MHz SYSOSC)
+ * ================================================================ */
+const SYSCTL = system.modules["/ti/driverlib/SYSCTL"].$static;
+SYSCTL.sysoscFreq     = "SYSOSC_32MHz";   /* 32MHz 默认 */
+SYSCTL.mclkDivider    = "MCLK_DIV1";       /* 不分频 */
+SYSCTL.ulpclkDivider  = "ULPCLK_DIV1";
+SYSCTL.hfxt           = "DISABLE";
+SYSCTL.syspll         = "DISABLE";
+
+/* ================================================================
+ *  2. UART0 — 调试串口 (PA0=TX, PA1=RX, 115200)
+ * ================================================================ */
+const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART0  = UART.addInstance();
+UART0.$name                              = "UART_0";
+UART0.peripheral.$assign                 = "UART0";
+UART0.targetBaudRate                     = 115200;
+UART0.ovsRate                            = "16";
+UART0.uartClkSrc                         = "BUSCLK";
+UART0.enableFIFO                         = false;  /* 关 FIFO 避免短字符串卡住 */
+UART0.peripheral.txPin.$assign           = "PA0";
+UART0.peripheral.rxPin.$assign           = "PA1";
+
+/* ================================================================
+ *  3. GPIO — PA7 输出 (LED), PA14 输入+上拉 (按键)
+ * ================================================================ */
+const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+
+/* 3a. PA7 — LED 输出 */
+const GPIO_LED = GPIO.addInstance();
+GPIO_LED.$name                           = "GPIO_LED";
+GPIO_LED.associatedPins.create(1);
+GPIO_LED.associatedPins[0].$name         = "LED_PIN";
+GPIO_LED.associatedPins[0].assignedPort  = "PORTA";
+GPIO_LED.associatedPins[0].assignedPin   = "7";
+GPIO_LED.associatedPins[0].pin.$assign   = "PA7";
+GPIO_LED.associatedPins[0].direction     = "OUTPUT";
+GPIO_LED.associatedPins[0].initialValue  = "CLEAR";
+
+/* 3b. PA14 — 按键输入 (内部上拉, 按下=低电平) */
+const GPIO_KEY = GPIO.addInstance();
+GPIO_KEY.$name                           = "GPIO_KEY";
+GPIO_KEY.associatedPins.create(1);
+GPIO_KEY.associatedPins[0].$name         = "KEY_PIN";
+GPIO_KEY.associatedPins[0].assignedPort  = "PORTA";
+GPIO_KEY.associatedPins[0].assignedPin   = "14";
+GPIO_KEY.associatedPins[0].pin.$assign   = "PA14";
+GPIO_KEY.associatedPins[0].direction     = "INPUT";
+GPIO_KEY.associatedPins[0].pull          = "PULL_UP";
+
+/* ================================================================
+ *  4. I2C0 — PA28=SDA, PA31=SCL, 400kHz (OLED + MPU6050)
+ * ================================================================ */
+const I2C    = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C0   = I2C.addInstance();
+I2C0.$name                               = "I2C_0";
+I2C0.peripheral.$assign                  = "I2C0";
+I2C0.targetBusRate                       = 400;      /* 400kHz Fast Mode */
+I2C0.peripheral.sdaPin.$assign           = "PA28";
+I2C0.peripheral.sclPin.$assign           = "PA31";
+
+/* ================================================================
+ *  5. Board — 未用引脚配置
+ * ================================================================ */
+const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+Board.configureUnused = true;
+/* ⚠️ 以下引脚在 Board 中应标记为 unused:
+ *   PA2~PA6 (时钟), PA19/PA20 (SWD)
+ */
