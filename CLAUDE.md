@@ -44,7 +44,7 @@
   - `DL_ADC12_readMemResult()` — 不存在，使用 `DL_ADC12_getMemResult()`
   - `DL_I2C_transmitBlocking()` / `DL_I2C_receiveBlocking()` — 不存在，使用 `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()`
   - `DL_TimerG_getCounterValue()` — 不存在，使用 `DL_TimerG_getTimerCount()`
-- **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0, TIMA1 — **不存在 TIMG1~5**
+- **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---
 
@@ -86,7 +86,7 @@
 | | PB7 | SPI0_POCI (MISO) | TFT / SPI 外设 MISO |
 | | PB5 | SPI0_CS0 | TFT / SPI 外设 CS |
 | **TIMA0 PWM** | PB0~PB3 | TIMA0_C0~C3 | 电机驱动 4路PWM |
-| **TIMA1 PWM** | PA8~PA11 | TIMA1_C0~C3 | 舵机/辅助PWM |
+| **TIMG8 PWM** | PA8~PA9 | TIMG8_C0~C1 | 舵机 (TIMG仅2通道/实例) |
 | **ADC** | PA24~PA31 | ADC12 通道 | 传感器模拟采集 |
 | | PA26/PA27 | ADC+GPIO 双功能 | **培训案例默认用这对** |
 | **GPIO(常用)** | PA7 | UART3_TX / I2C1_SCL / TIMA0_C3 | 继电器/通用输出 |
@@ -117,11 +117,11 @@
 // TCRT5000 循迹 — ADC
 // PA24=左1, PA25=左2, PA26=中, PA27=右2, PA28=右1 (5路)
 
-// 舵机 — TIMA1
-// PA8 = Pan, PA9 = Tilt
+// 舵机 — TIMG8 (2通道)
+// PA8 = Pan (TIMG8_C0), PA9 = Tilt (TIMG8_C1)
 
-// EC11 旋转编码器
-// PB2 = A相, PB3 = B相, PB4 = 按键
+// EC11 旋转编码器 (避开 PB2/PB3=编码器)
+// PA16 = A相, PA17 = B相, PB4 = 按键
 
 // 激光笔 / 蜂鸣器
 // PA10 = 激光MOS, PA11 = 蜂鸣器
@@ -440,9 +440,13 @@ void mpu6050_read_all(MPU6050_Data *data) {
     data->gz   = (int16_t)((buf[12] << 8) | buf[13]);
 }
 
-// 加速度计 → 角度
-float mpu6050_accel_angle(float ax, float az) {
-    return atan2f(ax, az) * 180.0f / 3.1415926f;
+// 加速度计 → 角度 (pitch: atan2(-ax, sqrt(ay^2+az^2)), roll: atan2(ay, az))
+// 注意: 6轴 Mahony 无磁力计修正, yaw 会漂移, 仅 pitch/roll 可靠
+float mpu6050_accel_pitch(float ax, float ay, float az) {
+    return atan2f(-ax, sqrtf(ay*ay + az*az)) * 57.29578f;
+}
+float mpu6050_accel_roll(float ay, float az) {
+    return atan2f(ay, az) * 57.29578f;
 }
 
 // Mahony AHRS 姿态解算 (六轴, 2K 参数)
@@ -664,33 +668,34 @@ char matrix_key_scan(void) {
 ### --- EC11 旋转编码器 ---
 
 ```c
-// A相 PB2, B相 PB3, 按键 PB4 (均有中断, 避开PA时钟引脚)
-// SysConfig: PB2/PB3/PB4 → GPIO 输入 → 双边沿中断 → GROUP1_IRQHandler
+// A相 PA16, B相 PA17, 按键 PB4 (均有中断, 避开PB2/PB3编码器)
+// SysConfig: PA16/PA17/PB4 → GPIO 输入 → 双边沿中断 → GROUP1_IRQHandler
 volatile int32_t ec11_count = 0;
 volatile bool    ec11_button = false;
 
 void GROUP1_IRQHandler(void) {
-    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOB,
-                        DL_GPIO_PIN_2 | DL_GPIO_PIN_3 | DL_GPIO_PIN_4);
-    // A/B 相位判断
-    if (status & DL_GPIO_PIN_2) {
-        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_2);
-        if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) {
-            if (!DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) ec11_count++;
-            else                                        ec11_count--;
-        } else {
-            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) ec11_count++;
+    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA,
+                        DL_GPIO_PIN_16 | DL_GPIO_PIN_17);
+    status |= DL_GPIO_getEnabledInterruptStatus(GPIOB, DL_GPIO_PIN_4);
+    // A/B 相位判断 (PA16=A, PA17=B)
+    if (status & DL_GPIO_PIN_16) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_16);
+        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_16)) {
+            if (!DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_17)) ec11_count++;
             else                                         ec11_count--;
+        } else {
+            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_17)) ec11_count++;
+            else                                          ec11_count--;
         }
     }
-    if (status & DL_GPIO_PIN_3) {
-        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_3);
-        if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_3)) {
-            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) ec11_count++;
-            else                                         ec11_count--;
+    if (status & DL_GPIO_PIN_17) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_17);
+        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_17)) {
+            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_16)) ec11_count++;
+            else                                          ec11_count--;
         } else {
-            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_2)) ec11_count--;
-            else                                         ec11_count++;
+            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_16)) ec11_count--;
+            else                                          ec11_count++;
         }
     }
     if (status & DL_GPIO_PIN_4) {
@@ -982,7 +987,7 @@ void servo_set_angle(uint32_t angle_deg) { // 0~180
 ```c
 // STEP 引脚连接 GPIO, DIR 连接 GPIO
 void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
-    DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_8); // DIR pin
+    // 设置方向
     if (dir_pin_state) DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_8);
     else DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_8);
 
@@ -1067,7 +1072,7 @@ void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
 - `ti_msp_dl_config.h` — SysConfig 自动生成，包含所有外设初始化
 - `ti_msp_dl_config.c` — SysConfig 自动生成的初始化函数 `SYSCFG_DL_init()`
 - `main.c` — 用户代码，在 `SYSCFG_DL_init()` 之后编写
-- SDK 默认安装路径: `C:\ti\mspm0_sdk_2_03_00_07\`
+- SDK 默认安装路径: `C:\ti\mspm0_sdk_2_10_00_04\`
 
 ### main.c 框架
 ```c
@@ -2500,7 +2505,7 @@ from media.sensor import Sensor
 sensor = Sensor(id=0, width=1280, height=720, fps=60)
 sensor.reset()
 sensor.set_pixformat(sensor.RGB888, chn=CAM_CHN_ID_0)
-sensor.set_framesize(chn=CAM_CHN_ID_0, width=640, height=480)
+sensor.set_framesize(chn=CAM_CHN_ID_0, width=640, height=480)  # or sensor.set_framesize(sensor.VGA)
 sensor.set_hmirror(True)
 sensor.set_vflip(False)
 sensor.run()                   # 必须在 MediaManager.init() 之前
@@ -2609,6 +2614,7 @@ pl.destroy()
 | GPIO12 (UART2_RXD) | PA0 (UART0_TX) | 可选ACK回传 |
 | GND | GND | 必须共地 |
 | 独立电池 5V | 独立电池 7.4V | 供电隔离 |
+| ⚠️ **重要** | PA0/PA1 与 CH340 共用 | 竞赛时拔掉 USB 即可用 K230 通信 |
 
 **⚠️ K230 启动前必须配置 FPIOA：**
 ```python
@@ -2897,8 +2903,8 @@ vp.loop()
 | **MPU6050 SCL** | | PA13 (I2C0_SCL) | |
 | **OLED SDA** | 0.96" SSD1306 | PA12 (I2C0_SDA) | 与MPU6050同总线 |
 | **OLED SCL** | | PA13 (I2C0_SCL) | |
-| **舵机1 Pan** | SG90/MG996R | PA8 (TIMA1_C0) | 50Hz, 500~2500us |
-| **舵机2 Tilt** | SG90/MG996R | PA9 (TIMA1_C1) | 50Hz |
+| **舵机1 Pan** | SG90/MG996R | PA8 (TIMG8_C0) | 50Hz, 500~2500us |
+| **舵机2 Tilt** | SG90/MG996R | PA9 (TIMG8_C1) | 50Hz |
 | **激光笔** | 蓝紫405nm ≤10mW | PA10 (MOS驱动) | GPIO控制MOS开关 |
 | **蜂鸣器** | 有源蜂鸣器 | PA11 | GPIO直接驱动 |
 | **LED 指示** | 红色LED | PA10 (共用) | 串电阻限流 |
@@ -2947,7 +2953,7 @@ vp.loop()
 |------|------|----------|
 | I2C0 | MPU6050 + OLED | 0x68 + 0x3C (不同地址, 可共存) |
 | TIMA0 PWM | TB6612 (ch0,ch1) | PB0, PB1 |
-| TIMA1 PWM | 舵机 ×2 (ch0,ch1) | PA8, PA9 |
+| TIMG8 PWM | 舵机 ×2 (ch0,ch1) | PA8, PA9 |
 | ADC | TCRT5000 ×5 | PA24~PA28 (5通道) |
 | TIMG 编码器 | MG310 ×2 + EC11 | 不同TIMG实例 |
 
