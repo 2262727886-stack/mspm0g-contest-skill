@@ -72,62 +72,117 @@
 | 供电 | 1.62V ~ 3.6V |
 | 封装 | LQFP48 / LQFP64 / VQFN32 |
 
-### 天猛星引脚映射 (LQFP64)
+### 天猛星引脚全映射 (源自官方引脚配置表)
 
-**⚠️ 天猛星为 64Pin LQFP 封装。以下均为实际板载引脚。**
+**文档来源**: 天猛星官方 markDown1779010001946 | **封装**: LQFP64 | **电平**: 3.3V
 
-| 类别 | 引脚 | 片上复用功能 | 天猛星用途 |
-|------|------|-------------|-----------|
-| **调试** | PA20 | SWCLK | SWD 调试时钟 |
-| | PA19 | SWDIO | SWD 调试数据 |
-| **串口(CH340)** | PA0 | UART0_TX / I2C0_SDA / TIMA0_C0 | 板载 CH340 → PC |
-| | PA1 | UART0_RX / I2C0_SCL / TIMA0_C1 | 板载 CH340 → PC |
-| **I2C0** | PA12 | I2C0_SDA / UART2_TX / TIMG8_C1 | OLED/MPU6050 SDA |
-| | PA13 | I2C0_SCL / UART2_RX / TIMG8_C0 | OLED/MPU6050 SCL |
-| **SPI0** | PB4 | SPI0_SCK | TFT / SPI 外设 SCK |
-| | PB6 | SPI0_PICO (MOSI) | TFT / SPI 外设 MOSI |
-| | PB7 | SPI0_POCI (MISO) | TFT / SPI 外设 MISO |
-| | PB5 | SPI0_CS0 | TFT / SPI 外设 CS |
-| **TIMA0 PWM** | PB0~PB3 | TIMA0_C0~C3 | 电机驱动 4路PWM |
-| **TIMG8 PWM** | PA8~PA9 | TIMG8_C0~C1 | 舵机 (TIMG仅2通道/实例) |
-| **ADC** | PA24~PA31 | ADC12 通道 | 传感器模拟采集 |
-| | PA26/PA27 | ADC+GPIO 双功能 | **培训案例默认用这对** |
-| **GPIO(常用)** | PA7 | UART3_TX / I2C1_SCL / TIMA0_C3 | 继电器/通用输出 |
-| | PA14 | I2C1_SCL | 辅助 I2C |
-| | PA15 | I2C1_SDA | 辅助 I2C |
-| | PA18 | UART2_TX / I2C1_SDA | 辅助串口 |
-| **时钟(禁用)** | PA2~PA6 | ROSC/LFXIN/HFXIN | **默认未焊接，勿用** |
-| **复位** | NRST | RST | 复位按键 |
+#### PA 端口 (31个GPIO)
 
-### 外设推荐引脚组合
+| 引脚 | 功能1 | 功能2 | 功能3 | 功能4 | 功能5 | 功能6 | Skill分配 |
+|------|-------|-------|-------|-------|-------|-------|-----------|
+| **PA0** | TIMG8_C1 | TIMA0_C0 | **UART0_TX** | I2C0_SDA | — | — | 🔒 CH340 TX |
+| **PA1** | TIMG8_C0 | TIMA0_C1 | **UART0_RX** | I2C0_SCL | — | — | 🔒 CH340 RX |
+| **PA2** | ROSC | TIMG8_C1 | TIMG7_C1 | SPI0_CS0 | SPI1_CS0 | — | 🚫 时钟ROSC |
+| **PA7** | TIMA0_C1 | TIMG7_C1 | TIMA0_C2 | TIMG8_C0 | — | — | ✅ TB6612 AIN1 |
+| **PA8** | TIMA0_C0 | SPI0_CS0 | UART1_TX | **TIMA1_C0** | — | — | ✅ 舵机1 Pan |
+| **PA9** | TIMA0_C1 | SPI0_PICO | UART1_RX | **TIMA1_C1** | — | — | ✅ 舵机2 Tilt |
+| **PA10** | I2C1_SDA | I2C0_SDA | SPI0_POCI | TIMG12_C0 | TIMA1_C0 | TIMA0_C2 | ✅ 激光MOS |
+| **PA11** | I2C_SCL | I2C0_SCL | SPI0_SCK | TIMA1_C1 | UART0_RX | — | ✅ 蜂鸣器 |
+| **PA12** | **TIMA0_C3** | TIMG0_C0 | CAN_TX | SPI0_SCK | — | — | ✅ 编码器/备用 |
+| **PA13** | CAN_RX | TIMG0_C1 | SPI0_POCI | UART3_RX | — | — | ✅ 编码器/备用 |
+| **PA14** | TIMG12_C0 | SPI0_POCI | UART3_TX | — | — | — | ✅ TB6612 AIN2 |
+| **PA15** | DAC_OUT | I2C_SCL | SPI_CS2 | TIMA1_C0 | TIMA0_C2 | — | ✅ TB6612 BIN1 |
+| **PA16** | TIMA1_C1 | SPI1_POCI | I2C1_SDA | — | — | — | ✅ EC11 A相 |
+| **PA17** | UART1_TX | SPI1_SCK | I2C1_SCL | TIMA0_C3 | TIMG7_C0 | TIMA1_C0 | ✅ EC11 B相 |
+| **PA18** | I2C1_SDA | UART1_RX | SPI1_PICO | TIMG7_C1 | TIMA1_C1 | **BSL** | ✅ TB6612 BIN2 |
+| **PA19** | — | — | — | — | — | — | 🔒 **SWDIO** |
+| **PA20** | — | — | — | — | — | — | 🔒 **SWCLK** |
+| **PA21** | VREF- | UART2_TX | TIMA0_C0 | TIMG6_C0 | TIMG8_C0 | — | ⚠️ ADC负基准 |
+| **PA22** | UART2_RX | TIMG8_C1 | TIMA_C1 | TIMG6_C1 | — | — | ✅ 备用 |
+| **PA23** | VREF+ | UART2_TX | SPI0_CS3 | TIMA0_C3 | TIMG0_C0 | TIMG7_C0 | ⚠️ ADC正基准 |
+| **PA24** | UART2_RX | SPI0_CS2 | TIMG0_C1 | TIMG7_C1 | TIMA1_C1 | — | ✅ TCRT5000 左1 |
+| **PA25** | TIMA0_C3 | TIMG12_C1 | SPI1_CS3 | UART3_RX | — | — | ✅ TCRT5000 左2 |
+| **PA26** | UART3_TX | SPI1_CS0 | CAN_TX | TIMG8_C0 | TIMG7_C0 | — | ✅ TCRT5000 中 |
+| **PA27** | TIMG7_C1 | TIMG8_C1 | SPI1_CS1 | CAN_RX | — | — | ✅ TCRT5000 右2 |
+| **PA28** | **I2C0_SDA** | TIMA1_C0 | TIMA0_C3 | TIMG7_C0 | UART0_TX | — | ✅ **I2C0 SDA** |
+| **PA29** | I2C1_SCL | TIMG8_C0 | TIMG6_C0 | — | — | — | ✅ TCRT5000 右1 |
+| **PA30** | TIMG8_C1 | TIMG6_C1 | I2C1_SDA | — | — | — | ✅ 备用 |
+| **PA31** | **I2C0_SCL** | TIMG12_C1 | TIMG7_C1 | TIMA1_C1 | UART0_RX | — | ✅ **I2C0 SCL** |
+
+#### PB 端口 (27个GPIO)
+
+| 引脚 | 功能1 | 功能2 | 功能3 | 功能4 | 功能5 | Skill分配 |
+|-------|-------|-------|-------|-------|-------|-----------|
+| **PB0** | TIMA1_C0 | TIMA0_C2 | SPI1_CS2 | UART0_TX | — | ✅ TB6612 PWMA |
+| **PB1** | TIMA1_C1 | SPI1_CS3 | UART0_RX | — | — | ✅ TB6612 PWMB |
+| **PB2** | TIMA1_C0 | TIMA0_C3 | UART3_TX | TIMG6_C0 | I2C1_SCL | ✅ 编码器A |
+| **PB3** | TIMA1_C1 | TIMG6_C1 | UART3_RX | I2C_SDA | — | ✅ 编码器B |
+| **PB4** | UART1_TX | TIMA1_C0 | TIMA0_C2 | — | — | ✅ EC11按键 / SPI0_SCK |
+| **PB5** | TIMA1_C1 | UART1_RX | — | — | — | ✅ SPI0_CS0 |
+| **PB6** | TIMG6_C0 | TIMG8_C0 | UART1_RX | SPI_CS0 | SPI0_CS1 | ✅ SPI0_PICO |
+| **PB7** | SPI1_POCI | SPI0_CS2 | TIMG8_C1 | TIMG6_C1 | UART1_RX | ✅ SPI0_POCI |
+| **PB8** | TIMA0_C0 | SPI_PICO | — | — | — | ✅ 矩阵按键行0 |
+| **PB9** | SPI_SCK | TIMA0_C1 | — | — | — | ✅ 矩阵按键行1 / 步进STEP |
+| **PB10** | **TIMG0_C0** | TIMG8_C0 | TIMG6_C0 | — | — | ✅ 矩阵按键行2 |
+| **PB11** | **TIMG0_C1** | TIMG8_C1 | TIMG6_C1 | — | — | ✅ 矩阵按键行3 |
+| **PB12** | TIMA0_C1 | TIMA0_C2 | UART3_TX | — | — | ✅ 矩阵按键列0 |
+| **PB13** | TIMG12_C0 | TIMA0_C3 | UART3_RX | — | — | ✅ 矩阵按键列1 |
+| **PB14** | SPI1_CS3 | SPI1_POCI | SPI0_CS3 | TIMG12_C1 | TIMA0_C0 | ✅ 矩阵按键列2 |
+| **PB15** | TIMG8_C0 | TIMG7_C0 | UART2_TX | SPI1_PICO | — | ✅ 矩阵按键列3 |
+| **PB16** | TIMG7_C1 | TIMG8_C1 | UART2_RX | SPI1_SCK | — | ✅ 备用 |
+| **PB17** | TIMA0_C2 | TIMA1_C0 | SPI0_PICO | UART2_TX | SPI1_CS1 | ✅ 备用 |
+| **PB18** | TIMA1_C1 | SPI1_CS2 | SPI0_SCK | UART2_RX | — | ✅ 备用 |
+| **PB19** | TIMG8_C1 | TIMG7_C1 | SPI0_POCI | — | — | ✅ 备用 |
+| **PB20** | TIMA0_C1 | TIMG12_C0 | TIMA0_C2 | SPI1_CS0 | SPI0_CS2 | ✅ 备用 |
+| **PB21** | TIMG8_C0 | SPI1_POCI | — | — | — | ✅ 备用 |
+| **PB22** | SPI1_PICO | TIMG8_C1 | — | — | — | 💡 **板载LED** |
+| **PB23** | SPI1_SCK | — | — | — | — | ✅ 备用 |
+| **PB24** | TIMG12_C1 | TIMA0_C3 | SPI0_CS3 | SPI0_CS1 | — | ✅ 备用 |
+| **PB25** | SPI0_CS0 | — | — | — | — | ✅ 备用 |
+| **PB26** | TIMA1_C0 | TIMA0_C3 | TIMG6_C0 | SPI0_CS1 | — | ✅ 备用 |
+| **PB27** | TIMG_C1 | TIMA1_C1 | SPI1_CS1 | — | — | ✅ 备用 |
+
+**图例**: 🔒=固定占用 🚫=禁用 ⚠️=谨慎使用 💡=板载LED ✅=已分配
+
+**关键说明**:
+- **PA3~PA6 官方不列** — 确认未引出，不可用
+- **CHIP/AGND** — 板载参考电压输出和模拟地
+- **TIMA1 确实存在** — PB0~PB3, PA8~PA11, PA16~PA18 均有 TIMA1 功能
+- **TIMG0 可用** — PB10(TIMG0_C0), PB11(TIMG0_C1)
+- **PA18 带有 BSL 功能** — 可能是 BSL 按键
+
+### 外设推荐引脚组合 (基于官方引脚表)
 
 ```c
-// === 竞赛常用引脚分配 ===
+// === 竞赛常用引脚分配 (官方引脚表验证) ===
 
 // 调试串口 (CH340, 固定不可改)
 // PA0 = UART0_TX, PA1 = UART0_RX
 
-// 电机 PWM (TB6612) — TIMA0
-// PB0 = PWMA, PB1 = PWMB
+// 电机 PWM (TB6612) — TIMA1 / TIMA0
+// PB0 = PWMA (TIMA0_C2), PB1 = PWMB (TIMA0_C3)
 // 方向: PA7(AIN1), PA14(AIN2), PA15(BIN1), PA18(BIN2)
 
-// 编码器 — TIMG (AB相)
+// 编码器 — TIMG6 (AB相)
 // PB2 = A相, PB3 = B相
 
 // OLED + MPU6050 — I2C0
-// PA12 = SDA, PA13 = SCL
+// PA28 = SDA (I2C0_SDA), PA31 = SCL (I2C0_SCL)
 
-// TCRT5000 循迹 — ADC
-// PA24=左1, PA25=左2, PA26=中, PA27=右2, PA28=右1 (5路)
+// TCRT5000 循迹 — ADC12
+// PA24=左1, PA25=左2, PA26=中, PA27=右2, PA29=右1 (5路)
 
-// 舵机 — TIMG8 (2通道)
-// PA8 = Pan (TIMG8_C0), PA9 = Tilt (TIMG8_C1)
+// 舵机 — TIMA1
+// PA8 = Pan (TIMA1_C0), PA9 = Tilt (TIMA1_C1)
 
 // EC11 旋转编码器 (避开 PB2/PB3=编码器)
 // PA16 = A相, PA17 = B相, PB4 = 按键
 
 // 激光笔 / 蜂鸣器
 // PA10 = 激光MOS, PA11 = 蜂鸣器
+
+// 板载LED (测试用)
+// PB22 = LED (低电平亮? 需实测)
 ```
 
 ### 外设引脚决策表
@@ -136,18 +191,19 @@
 
 | 外设需求 | 首选引脚 | 原因 |
 |----------|---------|------|
-| **电机 PWM** | PB0, PB1 (TIMA0_C0/C1) | 专为电机设计, 支援死区 |
-| **编码器 AB** | PB2, PB3 (TIMG 正交) | 默认支持编码器模式 |
-| **舵机** | PA8, PA9 (TIMG8_C0/C1) | 独立 TIMG 不影响 TIMA0 |
-| **I2C0** | PA12(SDA), PA13(SCL) | 板载默认 |
-| **TCRT5000** | PA24~PA28 | ADC 连续5通道 |
+| **电机 PWM** | PB0, PB1 (TIMA0_C2/C3) | TIMA0 支援死区 |
+| **编码器 AB** | PB2, PB3 (TIMG6) | 官方支持编码器模式 |
+| **舵机** | PA8, PA9 (TIMA1_C0/C1) | TIMA1 独立于 TIMA0 |
+| **I2C0** | PA28(SDA), PA31(SCL) | 官方引脚表确认 |
+| **TCRT5000** | PA24~PA27, PA29 | ADC12 5通道 |
 | **HC-SR04** | TRIG=PA15, ECHO=PB4 | 避开时钟区 |
 | **激光/蜂鸣器** | PA10/PA11 | GPIO 直驱 |
 | **EC11** | A=PA16, B=PA17, K=PB4 | 避开编码器 PB2/3 |
-| **矩阵按键** | 行=PB8~11, 列=PB12~15 | 避开 PA 时钟区 |
-| **SPI0** | SCK=PB4, MOSI=PB6, MISO=PB7, CS=PB5 | 标准引脚 |
+| **矩阵按键** | 行=PB8~11, 列=PB12~15 | TIMG0 可在 PB10/11 |
+| **SPI0** | SCK=PB4, MOSI=PB6, MISO=PB7, CS=PB5 | 标准 SPI0 |
 | **K230 UART** | PA0(RX), PA1(TX) | 竞赛拔 USB |
 | **继电器** | PA7 | 避开 I2C/PWM |
+| **板载LED** | PB22 | 测试/调试用 |
 
 ---
 
@@ -328,7 +384,7 @@ void UART0_INST_IRQHandler(void) {
 #define OLED_ADDR 0x3C
 
 void i2c_init(void) {
-    // SysConfig: I2C0(PA12=SDA,PA13=SCL) → 主机模式 → 400kHz (Fast Mode)
+    // SysConfig: I2C0(PA28=SDA,PA31=SCL) → 主机模式 → 400kHz (Fast Mode)
     DL_I2C_setPeripheralMode(I2C0, DL_I2C_PERIPHERAL_MODE_CONTROLLER);
 }
 
@@ -1031,10 +1087,10 @@ void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
 **TB6612 电机驱动：**
 | TB6612 | MSPM0G | 说明 |
 |--------|--------|------|
-| PWMA | PB0 (TIMA0_C0) | PWM, 20kHz |
+| PWMA | PB0 (TIMA0_C2) | PWM, 20kHz |
 | AIN1 | PA7 | 方向 1 |
 | AIN2 | PA14 | 方向 2 |
-| PWMB | PB1 (TIMA0_C1) | PWM, 20kHz |
+| PWMB | PB1 (TIMA0_C3) | PWM, 20kHz |
 | BIN1 | PA15 | 方向 1 |
 | BIN2 | PA18 | 方向 2 |
 | STBY | 3.3V | 使能 |
@@ -1044,16 +1100,16 @@ void stepper_step(int steps, uint8_t dir_pin_state, uint32_t step_delay_us) {
 **MPU6050 (I2C 陀螺仪+加速度计)：**
 | MPU6050 | MSPM0G |
 |---------|--------|
-| SDA | PA12 (I2C0_SDA) |
-| SCL | PA13 (I2C0_SCL) |
+| SDA | PA28 (I2C0_SDA) |
+| SCL | PA31 (I2C0_SCL) |
 | VCC | 3.3V |
 | AD0 | GND (地址 0x68) |
 
 **0.96" OLED SSD1306 (I2C)：**
 | OLED | MSPM0G |
 |------|--------|
-| SDA | PA12 (I2C0_SDA) |
-| SCL | PA13 (I2C0_SCL) |
+| SDA | PA28 (I2C0_SDA) |
+| SCL | PA31 (I2C0_SCL) |
 | VCC | 3.3V |
 | 地址 | 0x3C |
 
@@ -1264,7 +1320,7 @@ void button_update(Button *btn, bool pressed) {
 - 使用内部运放前必须先使能，使用后及时禁用省电
 - 中断回调函数中不要做耗时操作，只置标志位
 - PWM 死区用于 H 桥，避免上下管直通短路
-- I2C 默认使用 PA12(SDA)+PA13(SCL)，板载已有上拉可不再加
+- I2C 默认使用 PA28(SDA)+PA31(SCL)，板载已有上拉可不再加
 - 电机编码器线长尽量短，必要时加屏蔽
 - 双 K230+M0G 系统必须共地，供电独立隔离
 
@@ -2909,10 +2965,10 @@ vp.loop()
 
 | 硬件模块 | 型号/规格 | 天猛星引脚 | 说明 |
 |----------|----------|-----------|------|
-| **TB6612 PWMA** | 电机驱动 | PB0 (TIMA0_C0) | 左电机PWM, 20kHz |
+| **TB6612 PWMA** | 电机驱动 | PB0 (TIMA0_C2) | 左电机PWM, 20kHz |
 | **TB6612 AIN1** | | PA7 | 左电机方向1 |
 | **TB6612 AIN2** | | PA14 | 左电机方向2 |
-| **TB6612 PWMB** | | PB1 (TIMA0_C1) | 右电机PWM |
+| **TB6612 PWMB** | | PB1 (TIMA0_C3) | 右电机PWM |
 | **TB6612 BIN1** | | PA15 | 右电机方向1 |
 | **TB6612 BIN2** | | PA18 | 右电机方向2 |
 | **TB6612 STBY** | | 3.3V | 使能 |
@@ -2921,12 +2977,12 @@ vp.loop()
 | **MG310 编码器A** | 电机编码器 | PB2 (TIMG) | AB相A信号 |
 | **MG310 编码器B** | | PB3 (TIMG) | AB相B信号 |
 | **TCRT5000 ×5** | 红外循迹 | PA24~PA28 (ADC) | 5路模拟值 |
-| **MPU6050 SDA** | 六轴陀螺仪 | PA12 (I2C0_SDA) | I2C总线 |
-| **MPU6050 SCL** | | PA13 (I2C0_SCL) | |
-| **OLED SDA** | 0.96" SSD1306 | PA12 (I2C0_SDA) | 与MPU6050同总线 |
-| **OLED SCL** | | PA13 (I2C0_SCL) | |
-| **舵机1 Pan** | SG90/MG996R | PA8 (TIMG8_C0) | 50Hz, 500~2500us |
-| **舵机2 Tilt** | SG90/MG996R | PA9 (TIMG8_C1) | 50Hz |
+| **MPU6050 SDA** | 六轴陀螺仪 | PA28 (I2C0_SDA) | I2C总线 |
+| **MPU6050 SCL** | | PA31 (I2C0_SCL) | |
+| **OLED SDA** | 0.96" SSD1306 | PA28 (I2C0_SDA) | 与MPU6050同总线 |
+| **OLED SCL** | | PA31 (I2C0_SCL) | |
+| **舵机1 Pan** | SG90/MG996R | PA8 (TIMA1_C0) | 50Hz, 500~2500us |
+| **舵机2 Tilt** | SG90/MG996R | PA9 (TIMA1_C1) | 50Hz |
 | **激光笔** | 蓝紫405nm ≤10mW | PA10 (MOS驱动) | GPIO控制MOS开关 |
 | **蜂鸣器** | 有源蜂鸣器 | PA11 | GPIO直接驱动 |
 | **LED 指示** | 红色LED | PA10 (共用) | 串电阻限流 |
@@ -2975,7 +3031,7 @@ vp.loop()
 |------|------|----------|
 | I2C0 | MPU6050 + OLED | 0x68 + 0x3C (不同地址, 可共存) |
 | TIMA0 PWM | TB6612 (ch0,ch1) | PB0, PB1 |
-| TIMG8 PWM | 舵机 ×2 (ch0,ch1) | PA8, PA9 |
+| TIMA1 PWM | 舵机 ×2 (ch0,ch1) | PA8, PA9 |
 | ADC | TCRT5000 ×5 | PA24~PA28 (5通道) |
 | TIMG 编码器 | MG310 ×2 + EC11 | 不同TIMG实例 |
 
