@@ -3138,42 +3138,7 @@ int puts(const char *s) {
 
 ### VOFA+ PID 实时调参
 
-**VOFA+ 下载:** https://www.vofa.plus/
-
-**FireWater 协议 (文本，简单):**
-```c
-// 下位机 printf 发送, 逗号分隔, \n 结尾
-// 在控制循环中发送 PID 相关变量
-float setpoint, measurement, output, integral;
-printf("%.2f,%.2f,%.2f,%.2f\n", setpoint, measurement, output, integral);
-// VOFA+ 里选 FireWater 协议, 绑定串口即可看到4条波形
-```
-
-**JustFloat 协议 (二进制，高效):**
-```c
-// 帧尾: 0x00 0x00 0x80 0x7F
-// 适合高频传输 (>100Hz)
-void vofa_send_justfloat(float *data, uint8_t count) {
-    uint8_t *p = (uint8_t*)data;
-    for (int i = 0; i < count * 4; i++)
-        DL_UART_transmitDataBlocking(UART0, p[i]);
-    uint8_t tail[4] = {0x00, 0x00, 0x80, 0x7F};
-    for (int i = 0; i < 4; i++)
-        DL_UART_transmitDataBlocking(UART0, tail[i]);
-}
-
-// 使用: 4路数据, 发送 setpoint, measurement, output, error
-float debug[4] = {setpoint, measurement, output, error};
-vofa_send_justfloat(debug, 4);
-```
-
-**VOFA+ 操作步骤:**
-```
-1. VOFA+ → 添加控件 → 波形图
-2. 协议选 FireWater 或 JustFloat
-3. 端口选天猛星 CH340 串口, 波特率 115200
-4. 串口日志窗口可同时看原始数据
-```
+> VOFA+ FireWater/JustFloat 协议代码和操作步骤见 [第六章：调试与调参工具](#六调试与调参工具)。此处不重复。
 
 ---
 
@@ -3260,3 +3225,458 @@ if __name__ == '__main__':
 | printf 无输出 | 检查 fputc 重定向, 确认 UART0 在 SysConfig 中已配置 |
 | 短字符串丢失 | 关闭 UART TX FIFO 或发送后 flush |
 
+
+
+---
+
+## 十七、SysConfig GUI 配置指南
+
+### 界面布局
+
+打开 `.syscfg` 文件后，CCS 会显示 SysConfig 图形界面：
+
+```
+┌──────────────────────────┬─────────────────────────────┐
+│  左侧: Available Peripherals │  右侧: 配置面板              │
+│  (可添加的外设列表)          │  (选定外设的参数配置)         │
+│                            │                             │
+│  📌 ADD 按钮 → 搜索外设     │  已添加的外设会显示在这里      │
+│  ├── GPIO                  │  点击可修改引脚、参数         │
+│  ├── UART                  │                             │
+│  ├── I2C                   │                             │
+│  ├── SPI                   │                             │
+│  ├── Timer                 │                             │
+│  ├── ADC                   │                             │
+│  ├── OPA                   │                             │
+│  └── SYSCTL (时钟)         │                             │
+└──────────────────────────┴─────────────────────────────┘
+```
+
+### 配置步骤：UART0 调试串口
+
+```
+1. 点左侧 "ADD" → 搜索 "UART" → 选 "UART (Main)"
+2. 配置面板中:
+   Name:          UART_0
+   TX Pin:        PA0  ← 下拉选择
+   RX Pin:        PA1
+   Baud Rate:     115200
+   Data Bits:     8
+   Parity:        None
+   Stop Bits:     1
+3. Advanced → TX FIFO Size: 选 "Disabled" (避免短字符串卡 FIFO)
+4. 保存 (Ctrl+S)
+```
+
+### 配置步骤：GPIO 输出 (LED)
+
+```
+1. 点 "ADD" → 搜索 "GPIO" → 选 "GPIO Pin"
+2. 配置:
+   Pin:           PA7
+   Direction:     Output
+   Initial Value: Low
+   (PA7 无特殊功能冲突, 直接可用)
+3. 需要多个 GPIO 时重复 ADD, 每个引脚一个实例
+```
+
+### 配置步骤：GPIO 输入 (按键)
+
+```
+1. 点 "ADD" → "GPIO Pin"
+2. 配置:
+   Pin:           PA14
+   Direction:     Input
+   Pull:          Pull-up  (或 Pull-down 取决于硬件)
+   Interrupt:     Falling edge (如果上拉, 按下=低电平)
+3. 启用中断后 SysConfig 自动生成 IRQHandler 框架
+```
+
+### 配置步骤：I2C0 (OLED + MPU6050)
+
+```
+1. 点 "ADD" → 搜索 "I2C" → 选 "I2C (Main)"
+2. 配置:
+   Name:          I2C_0
+   SDA Pin:       PA28  ← 官方引脚表 I2C0_SDA
+   SCL Pin:       PA31  ← 官方引脚表 I2C0_SCL
+   Speed:         400 kHz (Fast Mode)
+   Mode:          Controller (主机)
+3. ⚠️ 不需要配内部上拉 (PA28/PA31 已有)
+```
+
+### 配置步骤：PWM (电机)
+
+```
+1. 点 "ADD" → 搜索 "Timer" → 选 "Timer G" (通用定时器)
+   或选 "Timer A" (高级定时器, 带死区)
+2. 电机推荐 TIMA0:
+   Name:          TIMA_0
+   Mode:          PWM
+   Period:        4000 (80MHz/4000 = 20kHz)
+   CC0 Pin:       PB0  ← TIMA0_C2
+   CC1 Pin:       PB1  ← TIMA0_C3
+3. 保存后, ti_msp_dl_config.h 自动生成:
+   - DL_TimerA_setPeriod(TIMA0, 4000)
+   - DL_TimerA_setCaptureCompareValue(TIMA0, 0, duty)
+```
+
+### 配置步骤：编码器 (TIMG 正交编码)
+
+```
+1. 点 "ADD" → "Timer G"
+2. 配置:
+   Name:          TIMG_6
+   Mode:          Encoder / QEI (正交编码接口)
+   A Phase Pin:   PB2
+   B Phase Pin:   PB3
+3. 自动生成初始化代码, DL_TimerG_getTimerCount() 读脉冲数
+```
+
+### 配置步骤：ADC (TCRT5000)
+
+```
+1. 点 "ADD" → 搜索 "ADC" → 选 "ADC12"
+2. 配置:
+   Name:          ADC_0
+   Resolution:    12-bit
+   Sample Time:   默认
+   Memory 0:      Channel 0 → 选 PA24
+   Memory 1:      Channel 1 → 选 PA25
+   ...依次添加 5 路
+3. 如需软件触发:
+   Trigger:       Software
+   Conversion Mode: Single
+```
+
+### 配置步骤：时钟 (SYSCTL)
+
+```
+1. 左侧 → 已有一项 "SYSCTL" (默认添加)
+2. 点开 SYSCTL:
+   SYSOSC:        32MHz (默认)
+   SYSPLL:        Disabled (默认) — 省电, 32MHz 够用
+   MCLK Source:   SYSOSC
+   MCLK Divider:  /1 (不分频)
+3. 如需 80MHz:
+   SYSPLL:        Enabled
+   SYSPLL Source: SYSOSC
+   SYSPLL Ref:    32MHz
+   MCLK Source:   SYSPLL (80MHz)
+   ⚠️ 96MHz 超频不支持, 最大 80MHz
+4. 配完查 CPUCLK_FREQ 宏确认 (ti_msp_dl_config.h)
+```
+
+### 常见 SysConfig 错误
+
+| 错误提示 | 原因 | 解决 |
+|----------|------|------|
+| "Pin conflict" | 两个外设用了同一引脚 | 改其中一个 |
+| "Function not available" | 引脚不支持该功能 | 换引脚 |
+| "Timer instance not available" | 定时器已被占用 | 用另一个 TIMG |
+| "Pull-up not valid on open drain" | 开漏引脚不支持内部上拉 | 加外部上拉或换引脚 |
+
+---
+
+## 十八、端到端完整工程示例
+
+### 工程配置 (SysConfig)
+
+```
+CCS Project: mspm0g_test
+MCU: MSPM0G3507
+SYSCTL: SYSOSC 32MHz (默认)
+添加外设:
+  ├── UART0:  PA0=TX, PA1=RX, 115200
+  ├── GPIO:   PA7=Output(LED), PA14=Input+PullUp(按键)
+  └── I2C0:   PA28=SDA, PA31=SCL, 400kHz
+```
+
+### main.c (完整可编译)
+
+```c
+/**
+ * 天猛星 MSPM0G3507 端到端测试工程
+ * 功能: UART printf + PA7 LED闪烁 + PA14 按键中断 + I2C0 扫描
+ * 引脚: PA0/1=UART, PA7=LED, PA14=KEY, PA28/31=I2C0
+ * 编译: CCS → Ctrl+B → 生成 .out
+ * 烧录: 用 XDS110 dslite flash
+ */
+#include "ti_msp_dl_config.h"
+#include <stdio.h>
+
+/* ---- printf 重定向到 UART0 ---- */
+int fputc(int ch, FILE *f) {
+    DL_UART_transmitDataBlocking(UART0, (uint8_t)ch);
+    return ch;
+}
+
+/* ---- SysTick 1ms (时钟=32MHz) ---- */
+volatile uint32_t g_ms_ticks = 0;
+void SysTick_Handler(void) { g_ms_ticks++; }
+void delay_ms(uint32_t ms) {
+    uint32_t start = g_ms_ticks;
+    while ((g_ms_ticks - start) < ms) { __WFI(); }
+}
+
+/* ---- I2C0 扫描从设备 ---- */
+void i2c_scan(void) {
+    printf("I2C0 Scan: ");
+    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+        DL_I2C_fillControllerTXFIFO(I2C0, &addr, 1);
+        DL_I2C_startControllerTransfer(I2C0, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
+        while (DL_I2C_isBusy(I2C0));
+        if (!DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_ARB_LOST)) {
+            printf("0x%02X ", addr);
+        }
+        DL_I2C_sendControllerStop(I2C0);
+    }
+    printf("\r\n");
+}
+
+/* ---- 主函数 ---- */
+int main(void)
+{
+    SYSCFG_DL_init();
+    SysTick_Config(SystemCoreClock / 1000);  /* 使用实际 MCLK 频率 */
+    __enable_irq();
+
+    printf("\r\n========================================\r\n");
+    printf("  天猛星 MSPM0G3507 端到端测试\r\n");
+    printf("  UART0: PA0/PA1, LED: PA7, KEY: PA14\r\n");
+    printf("  I2C0: PA28(SDA)/PA31(SCL)\r\n");
+    printf("  MCLK: %lu Hz\r\n", SystemCoreClock);
+    printf("========================================\r\n\r\n");
+
+    /* I2C0 扫描 (接 OLED=0x3C + MPU6050=0x68 应扫到两个地址) */
+    i2c_scan();
+
+    uint32_t led_tick = 0, scan_tick = 0;
+    uint8_t led_state = 0;
+
+    while (1)
+    {
+        /* 500ms LED 闪烁 */
+        if (g_ms_ticks - led_tick >= 500) {
+            led_tick = g_ms_ticks;
+            led_state = !led_state;
+            if (led_state) DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7);
+            else           DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);
+            printf("[%6lu] LED=%s\r\n", g_ms_ticks, led_state ? "ON" : "OFF");
+        }
+
+        /* 按键检测 (PA14, 按下=低电平) */
+        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14) == 0) {
+            delay_ms(20);  /* 消抖 */
+            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14) == 0) {
+                printf("[%6lu] KEY PRESSED!\r\n", g_ms_ticks);
+                i2c_scan();  /* 按键触发重新扫描 I2C */
+                while (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14) == 0);  /* 等松开 */
+            }
+        }
+
+        /* 每 5 秒重新扫描 I2C */
+        if (g_ms_ticks - scan_tick >= 5000) {
+            scan_tick = g_ms_ticks;
+            i2c_scan();
+        }
+    }
+}
+```
+
+---
+
+## 十九、I2C 总线共享指南 (OLED + MPU6050)
+
+### 问题
+
+OLED (0x3C) 和 MPU6050 (0x68) 共用 I2C0，同时刷 OLED 和读 MPU6050 会阻塞总线。
+
+### 解决方案
+
+```c
+/* === I2C 设备管理 === */
+typedef struct {
+    uint8_t addr;          /* 从机地址 */
+    uint32_t last_access;  /* 上次访问时间戳 */
+    uint32_t min_interval; /* 最小访问间隔 (ms) */
+} I2C_Device;
+
+static I2C_Device i2c_dev_oled = {0x3C, 0, 100};  /* OLED: 100ms 间隔 */
+static I2C_Device i2c_dev_mpu  = {0x68, 0, 5};     /* MPU: 5ms 间隔 */
+
+/* 设备内核对 I2C 总线访问 */
+bool i2c_device_access(I2C_Device *dev) {
+    if (g_ms_ticks - dev->last_access < dev->min_interval) return false;
+    dev->last_access = g_ms_ticks;
+    return true;
+}
+
+/* 主循环调度 */
+void main_loop(void) {
+    while (1) {
+        /* 每 100ms 刷新一次 OLED (耗时约 20ms, 发 1024 字节) */
+        if (i2c_device_access(&i2c_dev_oled)) {
+            oled_update_display();  /* 只刷新变化的部分, 不全刷 */
+        }
+        /* 每 5ms 读一次 MPU6050 (耗时约 1ms, 发 14 字节) */
+        if (i2c_device_access(&i2c_dev_mpu)) {
+            mpu6050_read_all(&mpu_data);
+        }
+        /* PID 计算不依赖 I2C, 随时可以执行 */
+        pid_control_loop();
+    }
+}
+```
+
+### I2C 冲突检测
+
+```c
+/* 发送前检查总线是否忙 */
+if (DL_I2C_isBusy(I2C0)) {
+    /* 上一次传输未完成, 跳过本次 */
+    return;
+}
+
+/* 超时保护: 防止从设备不响应导致死等 */
+#define I2C_TIMEOUT_MS  10
+uint32_t t0 = g_ms_ticks;
+while (DL_I2C_isBusy(I2C0)) {
+    if (g_ms_ticks - t0 > I2C_TIMEOUT_MS) {
+        /* 超时: 发送 STOP 恢复总线 */
+        DL_I2C_sendControllerStop(I2C0);
+        break;
+    }
+}
+```
+
+### OLED 部分刷新 (省带宽)
+
+```c
+/* 只刷新变化区域而不是整屏 */
+void oled_update_partial(uint8_t page_start, uint8_t page_end) {
+    oled_write_cmd(0x21); oled_write_cmd(0x00); oled_write_cmd(127);  /* 列 */
+    oled_write_cmd(0x22); oled_write_cmd(page_start); oled_write_cmd(page_end);
+    oled_write_data_buf(&oled_framebuffer[page_start * 128],
+                         (page_end - page_start + 1) * 128);
+}
+```
+
+---
+
+## 二十、中文取模教程
+
+### 工具
+
+推荐 **PCtoLCD2002** (免费, 百度搜索下载)
+
+### 取模设置
+
+```
+模式: 字符模式
+选项 → 字模选项:
+  点阵格式:  阴码 (1=点亮, 0=熄灭)
+  取模走向:  纵向取模, 字节倒序
+  字体大小:  16×16 (每个汉字 32 字节)
+  输出格式:  C51 格式
+```
+
+### 操作步骤
+
+```
+1. 输入汉字, 如 "电赛"
+2. 设置字体大小 16×16
+3. 点击 "生成字模"
+4. 复制生成的数组
+```
+
+### 天猛星 OLED 汉字显示代码
+
+```c
+/* PCtoLCD2002 生成: 16×16 纵向列行式, 阴码 */
+typedef struct {
+    uint8_t code[32];  /* 16×16 / 8 = 32 字节 */
+} Hanzi16;
+
+static const Hanzi16 hanzi_e = {  /* 电 */
+    {0x00,0x01,0x00,0x01,0x00,0x01,0xF8,0x3F,
+     0x08,0x21,0x08,0x21,0x08,0x21,0xF8,0x3F,
+     0x08,0x21,0x08,0x21,0x08,0x21,0xF8,0x3F,
+     0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01}
+};
+
+void oled_draw_hanzi16(uint8_t x, uint8_t y, const Hanzi16 *hz) {
+    for (uint8_t col = 0; col < 16; col++) {
+        uint16_t data = hz->code[col*2] | (hz->code[col*2+1] << 8);
+        for (uint8_t row = 0; row < 16; row++) {
+            oled_draw_pixel(x + col, y + row, (data >> row) & 1);
+        }
+    }
+}
+
+void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
+    /* 查表法: 根据字符串查找对应的 Hanzi16 结构体 */
+    /* 需要预建汉字-字模映射表 */
+    while (*str) {
+        if (*str & 0x80) {  /* 中文 (UTF-8 高位) */
+            /* GB2312 区位码查表, 此处简化为直接跳过 */
+            str += 3;  /* UTF-8 中文 3 字节 */
+            x += 16;
+        } else {  /* ASCII */
+            oled_putchar(x, y, *str++);
+            x += 6;
+        }
+        if (x > OLED_WIDTH - 16) { x = 0; y += 16; }
+    }
+}
+```
+
+---
+
+## 二十一、竞赛准备清单
+
+### 赛前 1 周
+
+- [ ] **SDK 全家桶安装**: CCS + SysConfig + MSPM0 SDK (最新版)
+- [ ] 跑通 XDS110/J-Link 烧录流程, 验证 dslite 命令可用
+- [ ] 所有外设模块单独测试通过 (LED, 按键, UART, I2C, PWM, ADC)
+- [ ] OLED 显示 "电赛 Ready" + MPU6050 正确输出姿态角
+- [ ] 电机空载跑通: PWM + 编码器读数 + PID 速度闭环
+- [ ] TCRT5000 在白纸/黑线上校准, VOFA+ 看到位置曲线
+- [ ] K230 连接验证: find_blobs 检测红色物体 → UART 发坐标
+- [ ] 制作并打印标定棋盘格/靶纸/A4 靶
+
+### 赛前 1 天
+
+- [ ] **完整系统联调**: 所有模块同时工作, 测功耗/发热
+- [ ] 电池满电, 备 2 组以上
+- [ ] 所有杜邦线/排线检查接触良好
+- [ ] CCS 工程打 ZIP 备份 + GitHub 推送
+- [ ] **UniFlash/CCS 离线可用** (场馆可能无网)
+- [ ] 打印引脚对照表 + 快速排错流程图
+
+### 比赛日
+
+- [ ] 到场先查场地光线 → 重新校准 TCRT5000 / K230 LAB 阈值
+- [ ] 测场地尺寸是否与题目一致 (100cm 正方形/间距)
+- [ ] 先跑最简单用例验证基本功能
+- [ ] **每改一次代码, 先 git commit 备份**
+- [ ] 电池电压 < 7.0V 即换电 (MG310 额定 7.4V)
+
+### 常见故障排查
+
+| 症状 | 先查 |
+|------|------|
+| 程序不跑 | SWD 是否接触, BCR 是否正常 |
+| 串口无输出 | PA0/PA1 上拉, 波特率匹配, FIFO 关闭 |
+| 电机不转 | TB6612 STBY=高, VM≥7V, 方向引脚电平 |
+| 编码器读 0 | AB 相接线, TIMG 编码器模式使能 |
+| OLED 花屏 | I2C 地址 0x3C, 上电后 delay 100ms |
+| K230 无数据 | FPIOA 是否先配, 波特率是否 115200 |
+
+### 注意事项
+
+- **PA0/PA1 开漏**: BSL 烧录用 9600, 用户程序 115200 需确保上拉
+- **SysConfig 默认 32MHz**: 不用 PLL 时 SysTick 配 32000 非 80000
+- **I2C 死等**: 从设备不响应时加超时 + STOP 恢复
+- **K230 UART 先 FPIOA**: `set_function(11, UART2_TXD)` 再 `UART(...)`
