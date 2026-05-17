@@ -1,0 +1,85 @@
+# 系统文件
+Desktop/
+Documents/
+Downloads/
+Pictures/
+Videos/
+Music/
+AppData/
+Application Data/
+Contacts/
+Cookies/
+Favorites/
+Links/
+Local Settings/
+My Documents/
+NetHood/
+PrintHood/
+Recent/
+Saved Games/
+Searches/
+SendTo/
+Templates/
+OneDrive/
+WPS Cloud Files/
+WPSDrive/
+「开始」菜单/
+
+# Windows 系统
+NTUSER.*
+ntuser.*
+*.LOG1
+*.LOG2
+*.TM.blf
+*.TMContainer*
+*.regtrans-ms
+
+# IDE / 编辑器
+.vscode/
+.vscode-shared/
+.copilot/
+workspace_ccstheia/
+
+# 缓存 / 编译
+__pycache__/
+build/
+dist/
+*.spec
+
+# 其他项目 (不相关)
+.GameAssistBox/
+.cc-switch/
+.cube/
+.stm32cubemx/
+.stmcube/
+.stmcufinder/
+STM32Cube/
+attendance_app/
+auto_qd*
+bilibili-clone/
+browser_profile/
+edge_profile/
+HNU_Attendance*
+minesweeper*
+plane_war/
+projects/
+quiz_*
+README_QUIZ_AUTO.md
+requirements_quiz.txt
+wxapp_decompiled/
+*.log
+.local/
+.node_repl_history
+.claude.json
+.claude/.last-cleanup
+.claude/backups/
+.claude/file-history/
+.claude/ide/
+.claude/plans/
+.claude/sessions/
+.claude/shell-snapshots/
+.claude/telemetry/
+.claude/projects/
+.claude/settings.json
+.claude/settings.local.json
+.gitconfig
