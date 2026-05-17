@@ -2499,6 +2499,98 @@ finally:
     MediaManager.deinit()
 ```
 
+### ✅ K230 OLED SSD1306 已验证驱动
+
+以下代码在 K230 + SSD1306 128×64 I2C 上实测通过。**逐页写入模式防止水平寻址丢字节导致的画面平移。**
+
+```python
+# ===== OLED SSD1306 I2C 驱动 (已验证) =====
+from machine import I2C
+
+OLED_ADDR = 0x3C
+OLED_W = 128; OLED_H = 64; OLED_PAGES = OLED_H // 8
+oled_fb = bytearray(OLED_W * OLED_PAGES)
+i2c = I2C(0, freq=400000)  # I2C0 与GC2093共用, I2C1需FPIOA配置
+
+def oled_cmd(c):
+    """写命令, 带重试"""
+    for _ in range(3):
+        try:
+            i2c.writeto(OLED_ADDR, bytearray([0x00, c]))
+            return
+        except OSError:
+            time.sleep_us(100)
+
+def oled_data(data):
+    """写数据, 64字节小包 + 包间延时 — 与GC2093共享I2C0不冲突"""
+    for i in range(0, len(data), 64):
+        chunk = data[i:i+64]
+        for _ in range(3):
+            try:
+                i2c.writeto(OLED_ADDR, bytearray([0x40]) + chunk)
+                break
+            except OSError:
+                time.sleep_us(200)
+        time.sleep_us(50)
+
+def oled_init():
+    for c in bytes([0xAE,0xD5,0x80,0xA8,0x3F,0xD3,0x00,0x40,
+                     0x8D,0x14,0x20,0x00,0xA1,0xC8,0xDA,0x12,
+                     0x81,0xCF,0xD9,0xF1,0xDB,0x40,0xA4,0xA6,0xAF]):
+        oled_cmd(c)
+
+def oled_refresh():
+    """逐页写入 — 每页重置列指针, 防I2C丢字节导致画面平移"""
+    for page in range(OLED_PAGES):
+        oled_cmd(0xB0 | page)    # 页地址 0xB0~0xB7
+        oled_cmd(0x00)           # 列低4位=0
+        oled_cmd(0x10)           # 列高4位=0
+        page_data = oled_fb[page*OLED_W : (page+1)*OLED_W]
+        oled_data(page_data)
+
+def oled_cls():
+    for i in range(len(oled_fb)): oled_fb[i] = 0
+
+def oled_px(x, y, c):
+    if 0 <= x < OLED_W and 0 <= y < OLED_H:
+        idx = x + (y//8)*OLED_W
+        if c: oled_fb[idx] |= (1 << (y&7))
+        else:  oled_fb[idx] &= ~(1 << (y&7))
+
+# 6x8 ASCII 字模 (0x20~0x7E, 每字符6字节纵向)
+_F6 = [b'\x00\x00\x00\x00\x00\x00',b'\x00\x00\x5f\x00\x00\x00', ...]  # 完整字模见工程文件
+
+def oled_ch(x, y, ch):
+    if ch < 0x20 or ch > 0x7E: return
+    g = _F6[ch - 0x20]
+    for col in range(6):
+        d = g[col]
+        for row in range(8):
+            oled_px(x+col, y+row, (d>>row)&1)
+
+def oled_str(x, y, s):
+    cx, cy = x, y
+    for c in s:
+        if c == '\n': cx = x; cy += 9; continue
+        if cy >= OLED_H: return
+        oled_ch(cx, cy, ord(c))
+        cx += 6
+        if cx > OLED_W - 6: cx = x; cy += 9
+
+# 主循环中调用 (每20帧刷新, 加延时等I2C释放)
+# if fc % 20 == 0:
+#     time.sleep_us(500)
+#     oled_cls()
+#     oled_str(0, 0, "Hello K230")
+#     oled_refresh()
+```
+
+**关键坑:**
+1. **必须逐页写入** (0xB0+page), 不能用水平寻址 (0x21) — 后者I2C丢字节会导致整屏平移
+2. **64字节小包 + 50μs包间延时** — 与 GC2093 共享 I2C0 时不阻塞
+3. **写入前延时 500μs** — 等 camera I2C 释放
+4. **每 20 帧刷新** (~0.3s) — 降低 I2C 占用, OLED 保持稳定显示
+
 ### --- Sensor (摄像头) ---
 
 ```python
@@ -2619,6 +2711,7 @@ pl.destroy()
 | 13 | **FPIOA 必配** | 所有外设使用前必须 `fpioa.set_function()`，否则不工作 |
 | 14 | **固件分支** | `canmv_k230`(RTOS纯MicroPython)是唯一维护分支，旧 `k230_canmv`(Linux+RTOS双系统)已停止维护 |
 | 15 | **UART 中断** | UART 等外设硬件中断未暴露给 MicroPython，仅 GPIO 中断可用 |
+| 16 | **OLED I2C0 平移** | OLED 与 GC2093 共享 I2C0 时, 水平寻址模式 (0x21) 丢字节会导致画面左右平移。**解决**: 逐页写入 (0xB0+page), 每页重置列指针。每20帧刷新+500μs延时 |
 
 ---
 
