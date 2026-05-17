@@ -49,15 +49,21 @@ def oled_data(data):
         time.sleep_us(50)  # 包间延时, 释放总线
 
 def oled_init():
+    # 水平寻址模式, 确保列地址自动推进
     for c in bytes([0xAE,0xD5,0x80,0xA8,0x3F,0xD3,0x00,0x40,
                      0x8D,0x14,0x20,0x00,0xA1,0xC8,0xDA,0x12,
                      0x81,0xCF,0xD9,0xF1,0xDB,0x40,0xA4,0xA6,0xAF]):
         oled_cmd(c)
 
 def oled_refresh():
-    oled_cmd(0x21); oled_cmd(0x00); oled_cmd(0x7F)
-    oled_cmd(0x22); oled_cmd(0x00); oled_cmd(0x07)
-    oled_data(oled_fb)
+    """逐页写入,每页重置列指针 — 防I2C丢字节导致平移"""
+    for page in range(OLED_PAGES):          # 8页
+        oled_cmd(0xB0 | page)               # 设置页地址 (0xB0~0xB7)
+        oled_cmd(0x00)                      # 列低4位 = 0
+        oled_cmd(0x10)                      # 列高4位 = 0 → 列=0
+        # 发送本页128字节
+        page_data = oled_fb[page*OLED_W : (page+1)*OLED_W]
+        oled_data(page_data)
 
 def oled_cls():
     for i in range(len(oled_fb)): oled_fb[i] = 0
@@ -216,8 +222,9 @@ try:
 
         Display.show_image(img)
 
-        # ---- OLED 刷新 (每8帧, 降低I2C占用) ----
-        if fc % 8 == 0:
+        # ---- OLED 刷新 (每20帧≈0.3s, 逐页写入防I2C乱序) ----
+        if fc % 20 == 0:
+            time.sleep_us(500)  # 等 GC2093 I2C 释放
             oled_cls()
             oled_str(0, 0, "25E Vision")
             if target_ok:
