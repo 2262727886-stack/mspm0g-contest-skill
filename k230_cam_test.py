@@ -20,12 +20,12 @@ Display.init(Display.VIRT, width=640, height=480, to_ide=True)
 MediaManager.init()
 sensor.run()
 
-# ===== 二、OLED SSD1306 I2C0 (与GC2093共用总线) =====
+# ===== 二、OLED SSD1306 I2C1 (独立总线, 不与GC2093冲突) =====
 OLED_ADDR = 0x3C
 OLED_W = 128; OLED_H = 64; OLED_PAGES = OLED_H // 8
 oled_fb = bytearray(OLED_W * OLED_PAGES)
-i2c = I2C(0, freq=400000)
-print("I2C0:", i2c.scan())  # 应看到 0x3C
+i2c = I2C(1, freq=400000)  # I2C1 独立总线, 不与 GC2093 抢 I2C0
+print("I2C1:", i2c.scan())  # 应看到 0x3C
 
 def oled_cmd(c):
     i2c.writeto(OLED_ADDR, bytearray([0x00, c]))
@@ -164,7 +164,7 @@ oled_str(0, 0,  "K230 25E Test")
 oled_str(0, 12, "GC2093 QVGA")
 oled_str(0, 24, "A4 + RED Target")
 oled_str(0, 36, "OLED SSD1306")
-oled_str(0, 55, "I2C0 0x3C OK")
+oled_str(0, 55, "I2C1 0x3C OK")
 oled_refresh()
 time.sleep_ms(1000)
 
