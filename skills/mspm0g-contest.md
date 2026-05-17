@@ -2954,3 +2954,224 @@ vp.loop()
 | TIMA1 PWM | 舵机 ×2 (ch0,ch1) | PA8, PA9 |
 | ADC | TCRT5000 ×5 | PA24~PA28 (5通道) |
 | TIMG 编码器 | MG310 ×2 + EC11 | 不同TIMG实例 |
+
+---
+
+## 十六、烧录与调试工具链
+
+### 三种烧录方式
+
+| 方式 | 工具 | 接口 | 速度 | 推荐度 | 文件格式 |
+|------|------|------|------|--------|----------|
+| **J-Link** | SEGGER J-Link + UniFlash | SWD (PA19/PA20) | 快 | ⭐⭐⭐ | .out |
+| **XDS110** | TI XDS110 + UniFlash/CCS | SWD (PA19/PA20) | 快 | ⭐⭐⭐ | .out |
+| **串口(BSL)** | UniFlash + 板载CH340 | PA0(TX)/PA1(RX) | 慢 | ⭐ BSL不稳定 | .txt/.hex |
+
+### J-Link 烧录步骤
+
+```
+1. 用杜邦线连接:  J-Link        天猛星
+                  SWDIO (TMS) → PA19
+                  SWCLK       → PA20
+                  3.3V        → 3.3V
+                  GND         → GND
+2. 打开 UniFlash → Device: MSPM0G3507
+3. 选择 Connection: SEGGER J-Link
+4. Load Image → 选择 .out 文件
+5. 勾选 "Run Target After Program Load"
+6. 点击 "Load Image" 烧录
+```
+
+### XDS110 烧录步骤
+
+```
+1. 杜邦线连接:    XDS110       天猛星
+                  TMS/SWDIO  → PA19
+                  TCK/SWCLK  → PA20
+                  3V3        → 3.3V
+                  GND        → GND
+2. UniFlash → Connection: Texas Instruments XDS110 USB Debug Probe
+3. Load Image → 烧录
+4. 无需按 BSL/RST 键
+```
+
+### 串口(BSL)烧录（仅紧急备用）
+
+```
+1. Type-C 连接电脑 (CH340 串口)
+2. 按住 BSL 键不放
+3. 按一下 RST 键，1秒后松 RST
+4. 10秒内 UniFlash 点击 "Load Image"
+5. ⚠️ 即使报红字 "Image Loading failed..." 也是正常
+   只要绿色进度条到100%就是烧录成功
+```
+
+### CCS 生成 .txt 文件 (串口烧录用)
+
+CCS 默认只生成 `.out`，需在 **Project → Properties → Build → Steps → Post-build steps** 添加：
+
+```
+${CCS_INSTALL_ROOT}/tools/compiler/ti-cgt-armllvm_4.0.2.LTS/bin/tiarmhex --ti_txt ${ProjName}.out
+```
+
+---
+
+### printf 重定向到串口 (CCS)
+
+```c
+#include "ti_msp_dl_config.h"
+#include <stdio.h>
+#include <string.h>
+
+/* fputc 重定向到 UART0 (PA0=TX) */
+int fputc(int ch, FILE *f) {
+    DL_UART_transmitDataBlocking(UART0, (uint8_t)ch);
+    return ch;
+}
+
+/* 完整重定向: 如需 fputs/puts 也重定向 */
+int fputs(const char *s, FILE *f) {
+    uint16_t len = strlen(s);
+    for (uint16_t i = 0; i < len; i++)
+        DL_UART_transmitDataBlocking(UART0, (uint8_t)s[i]);
+    return len;
+}
+
+int puts(const char *s) {
+    int n = fputs(s, stdout);
+    fputs("\n", stdout);
+    return n + 1;
+}
+```
+
+**SysConfig UART 配置要点：**
+- UART0: PA0=TX, PA1=RX, 115200-8-N-1
+- **建议关闭 TX FIFO** (TX FIFO Size = 0)，否则短字符串可能不发送
+- 或发送后调用 `DL_UART_flushTXFIFO(UART0)`
+
+---
+
+### VOFA+ PID 实时调参
+
+**VOFA+ 下载:** https://www.vofa.plus/
+
+**FireWater 协议 (文本，简单):**
+```c
+// 下位机 printf 发送, 逗号分隔, \n 结尾
+// 在控制循环中发送 PID 相关变量
+float setpoint, measurement, output, integral;
+printf("%.2f,%.2f,%.2f,%.2f\n", setpoint, measurement, output, integral);
+// VOFA+ 里选 FireWater 协议, 绑定串口即可看到4条波形
+```
+
+**JustFloat 协议 (二进制，高效):**
+```c
+// 帧尾: 0x00 0x00 0x80 0x7F
+// 适合高频传输 (>100Hz)
+void vofa_send_justfloat(float *data, uint8_t count) {
+    uint8_t *p = (uint8_t*)data;
+    for (int i = 0; i < count * 4; i++)
+        DL_UART_transmitDataBlocking(UART0, p[i]);
+    uint8_t tail[4] = {0x00, 0x00, 0x80, 0x7F};
+    for (int i = 0; i < 4; i++)
+        DL_UART_transmitDataBlocking(UART0, tail[i]);
+}
+
+// 使用: 4路数据, 发送 setpoint, measurement, output, error
+float debug[4] = {setpoint, measurement, output, error};
+vofa_send_justfloat(debug, 4);
+```
+
+**VOFA+ 操作步骤:**
+```
+1. VOFA+ → 添加控件 → 波形图
+2. 协议选 FireWater 或 JustFloat
+3. 端口选天猛星 CH340 串口, 波特率 115200
+4. 串口日志窗口可同时看原始数据
+```
+
+---
+
+### Python 串口抓取脚本
+
+```python
+"""serial_capture.py — 抓取 PID 调试数据的 Python 脚本"""
+import serial
+import csv
+import sys
+from datetime import datetime
+
+# === 配置 ===
+PORT = 'COM3'       # ⚠️ 需根据实际串口号修改, 不确定时运行后看提示
+BAUD = 115200
+CSV_PATH = 'pid_data.csv'
+
+def list_ports():
+    """列出可用串口"""
+    import serial.tools.list_ports
+    ports = serial.tools.list_ports.comports()
+    if not ports:
+        print("未找到串口! 请检查 USB 连接")
+        return
+    print("可用串口:")
+    for p in ports:
+        print(f"  {p.device} — {p.description}")
+
+def capture():
+    if PORT == 'COM3':
+        list_ports()
+        print(f"\n请在脚本中修改 PORT 变量为实际串口号")
+    
+    ser = serial.Serial(PORT, BAUD, timeout=1)
+    print(f"已连接 {PORT}, 开始抓取... (Ctrl+C 停止)")
+    
+    with open(CSV_PATH, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['timestamp', 'ch0', 'ch1', 'ch2', 'ch3'])
+        
+        try:
+            while True:
+                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                if line:
+                    try:
+                        vals = [float(v.strip()) for v in line.split(',') if v.strip()]
+                        ts = datetime.now().isoformat()
+                        writer.writerow([ts] + vals)
+                        f.flush()  # 实时写入磁盘
+                        print(f"[{ts}] {vals}")
+                    except ValueError:
+                        pass  # 非数据行跳过
+        except KeyboardInterrupt:
+            print(f"\n已保存到 {CSV_PATH}")
+        finally:
+            ser.close()
+
+if __name__ == '__main__':
+    capture()
+```
+
+---
+
+### 串口日志调试
+
+**串口助手确认串口号：**
+```
+1. 设备管理器 → 端口(COM和LPT) → 找 "USB-SERIAL CH340"
+2. 记下 COM 号 (如 COM5)
+3. 串口助手选对应 COM, 115200-8-N-1, 打开
+4. 按天猛星 RST, 应能看到 printf 输出
+```
+
+**CCS 调试时查看串口输出：**
+- CCS 内建的 Terminal 视图可直接看 UART 输出
+- 或另开 VOFA+/串口助手查看
+
+**常见串口问题：**
+
+| 问题 | 解决 |
+|------|------|
+| 串口打不开 | 检查是否被 CCS/其他程序占用, 关掉CCS Terminal |
+| 数据乱码 | 检查波特率是否匹配 (115200) |
+| printf 无输出 | 检查 fputc 重定向, 确认 UART0 在 SysConfig 中已配置 |
+| 短字符串丢失 | 关闭 UART TX FIFO 或发送后 flush |
+
