@@ -277,24 +277,25 @@ try:
             cb = sum(c[1] for c in a4_corners)//4
             img.draw_cross(ca, cb, color=(0,0,255), size=10, thickness=2)
 
-        # ---- 红色靶心 ----
+        # ---- 红色靶心: find_circles (霍夫圆, 圆心精度远优于blob) ----
+        raw_ok = False; raw_cx = 0; raw_cy = 0; raw_r = 0
         if a4_ok and a4_corners:
-            xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=4
+            xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=8
             roi=(min(xs)+mg, min(ys)+mg, max(xs)-min(xs)-2*mg, max(ys)-min(ys)-2*mg)
-            blobs = img.find_blobs(RED_TARGET, roi=roi, pixels_threshold=15, merge=True)
+            circles = img.find_circles(threshold=1800, r_min=5, r_max=40,
+                                        roi=roi, x_margin=3, y_margin=3, r_margin=3)
         else:
-            blobs = img.find_blobs(RED_TARGET, pixels_threshold=40, merge=True)
+            circles = img.find_circles(threshold=1800, r_min=5, r_max=40)
 
-        # ---- 选最佳 blob ----
-        raw_ok = False; raw_cx = 0; raw_cy = 0
-        if blobs:
-            for b in sorted(blobs, key=lambda x: x.area(), reverse=True):
-                if b.density() < 0.35: continue
-                # 用 blob 质心 (cx/cy) 而非 bbox 中心, 对圆形靶心更精确
-                bx = b.cx(); by = b.cy()
-                if a4_ok and not target_in_center(bx, by, a4_corners, 0.35): continue
-                raw_cx = bx; raw_cy = by; raw_ok = True
-                break
+        if circles:
+            # 选 magnitude 最大的圆 (边缘最清晰)
+            c = max(circles, key=lambda x: x.magnitude())
+            if a4_ok and not target_in_center(c.x(), c.y(), a4_corners, 0.4):
+                pass  # 不在中心区, 跳过
+            else:
+                raw_cx = c.x(); raw_cy = c.y(); raw_r = c.r()
+                raw_ok = True
+                img.draw_circle(c.x(), c.y(), c.r(), color=(0,255,0), thickness=2)
 
         # ---- 3帧中值滤波 (零延迟消抖) ----
         if raw_ok:
@@ -311,10 +312,9 @@ try:
             if lost_cnt > 20:
                 target_ok = False; med_buf = []
 
-        # 画准星
+        # 画圆检测结果 + 准星
         if target_ok:
-            img.draw_cross(target_cx, target_cy, color=(0,255,0), size=12, thickness=2)
-            img.draw_circle(target_cx, target_cy, 6, color=(0,255,0), thickness=1)
+            img.draw_cross(target_cx, target_cy, color=(0,255,0), size=14, thickness=2)
 
         # ---- IDE UI ----
         fps = clock.fps()
