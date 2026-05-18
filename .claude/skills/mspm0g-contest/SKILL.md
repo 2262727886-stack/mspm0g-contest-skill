@@ -33,6 +33,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **M0G** | TIMA0 舵机 | 🟡 代码就绪 | 待实机 |
 | **M0G** | I2C0 OLED / I2C1 MPU6050 | 🟡 代码就绪 | 待实机 |
 | **M0G** | ADC0 8路TCRT5000 | 🟡 代码就绪 | 待实机 |
+| **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 已验证 | 实机烧录成功,LED闪烁 |
 | **M0G** | UART0 CH340 printf | 🟡 代码就绪 | 待实机 |
 | **M0G** | PID/滤波/卡尔曼 算法 | ❌ 未实机验证 | 纯算法代码 |
 | **M0G** | Flash 参数存储 | ❌ 未实机验证 | |
@@ -2145,12 +2146,13 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
 |------|------|------|------|--------|----------|
 | **XDS110** | TI XDS110 + UniFlash/CCS | SWD (PA19/PA20) | 快 | ⭐⭐⭐ 强烈推荐 | .out |
 | **J-Link** | SEGGER J-Link + UniFlash | SWD (PA19/PA20) | 快 | ⭐⭐⭐ | .out |
-| **串口(BSL)** | UniFlash + 板载CH340 | PA0(TX)/PA1(RX) | 慢 | ⚠️ 不稳定！程序可能不运行 | .txt/.hex |
+| **串口(BSL)** | UniFlash + 板载CH340 | PA0(TX)/PA1(RX) | 慢(920B/s) | ✅ **已验证可用** | .txt (tiarmhex生成) |
 
-**⚠️ BSL 串口烧录已知问题：**
-- 烧录成功但程序可能不执行（多次 CRC 验证失败，即使冷启动也无法运行）
-- PA0/PA1 开漏导致 115200 通信不可靠
-- **强烈建议使用 XDS110，CLI 一键烧录：** `dslite flash --config=xxx.ccxml firmware.out`
+**✅ BSL 串口烧录实测验证 (2025-05-18)：**
+- UniFlash 9.5.0 + COM5 + MSPM0G3507 烧录成功，程序正常执行
+- ⚠️ 两个误报错误可忽略：`Image Loading Failed` 和 `Verification Failed for Datablock` — 固件实际已烧入
+- 小固件(<1KB) 触发 `Data Block Size less than 1KB` 假警告，不影响运行
+- **推荐 BSL 作为 XDS110 到货前的可靠替代方案**
 
 ### J-Link 烧录步骤
 
@@ -2180,15 +2182,27 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
 4. 无需按 BSL/RST 键
 ```
 
-### 串口(BSL)烧录（仅紧急备用）
+### 串口(BSL)烧录 (✅ 实测验证)
 
 ```
-1. Type-C 连接电脑 (CH340 串口)
-2. 按住 BSL 键不放
-3. 按一下 RST 键，1秒后松 RST
-4. 10秒内 UniFlash 点击 "Load Image"
-5. ⚠️ 即使报红字 "Image Loading failed..." 也是正常
-   只要绿色进度条到100%就是烧录成功
+1. CCS 编译 → Ctrl+B
+2. 生成 .txt: tiarmhex --ti_txt firmware.out -o firmware.txt
+3. UniFlash → Device: MSPM0G3507 → Connection: UART
+4. COM Port: COM5 → Load Image → 选 .txt
+5. 按住 BSL 键 → 按 RST → 1秒后松 BSL
+6. UniFlash 点 Start
+7. 报错忽略: "Image Loading Failed" 和 "Verification Failed" 均为误报警
+8. 拔插 Type-C 冷启动 → OK
+```
+
+> **实测**: BSL 烧录 920B @ 0.9kB/s, 程序正常执行。XDS110 到货前可靠替代。
+
+### CCS Post-build 自动生成 .txt
+
+CCS → Project → Properties → Build → Steps → Post-build steps：
+
+```
+${CCS_INSTALL_ROOT}/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/bin/tiarmhex --ti_txt ${ProjName}.out
 ```
 
 ### 软件触发 BSL (基于 bsl_software_invoke_app_demo_uart 例程验证)
