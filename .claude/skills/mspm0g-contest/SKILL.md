@@ -1796,6 +1796,11 @@ count,pwm,target,Kp_x10,Ki_x100,Kd_x100,base_pwm
 5. `I8` → 加微量积分消除静差
 6. 振荡 → 降 P 或加 D
 
+#### 完整例程
+
+> `Documents/model/PID_Speed/` 包含可直接编译运行的完整工程：
+> `main.c` + `pid.c/h` + `encoder.c/h` + `motor.c/h` + `empty.syscfg`
+
 #### ⚠️ 串口调参自动配置
 
 当用户说"调PID"时，自动执行以下配置：

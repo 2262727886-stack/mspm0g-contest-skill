@@ -1,0 +1,66 @@
+/**
+ * test_1 — TB6612 + Encoder B (GPIO 中断)
+ */
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
+// @cliArgs --board /ti/boards/LP_MSPM0G3507 --rtos nortos
+
+const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1  = GPIO.addInstance();
+const GPIO2  = GPIO.addInstance();
+const GPIO3  = GPIO.addInstance();
+const PWM    = scripting.addModule("/ti/driverlib/PWM", {}, false);
+const PWM1   = PWM.addInstance();
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1  = UART.addInstance();
+
+GPIO1.$name                         = "GPIO";
+GPIO1.associatedPins[0].$name       = "LED";
+GPIO1.associatedPins[0].pin.$assign = "PB22";
+
+GPIO2.$name                         = "GPIO_TB6612";
+GPIO2.associatedPins.create(4);
+GPIO2.associatedPins[0].$name       = "AIN1";
+GPIO2.associatedPins[0].pin.$assign = "PA13";
+GPIO2.associatedPins[1].$name       = "AIN2";
+GPIO2.associatedPins[1].pin.$assign = "PA12";
+GPIO2.associatedPins[2].$name       = "BIN1";
+GPIO2.associatedPins[2].pin.$assign = "PB0";
+GPIO2.associatedPins[3].$name       = "BIN2";
+GPIO2.associatedPins[3].pin.$assign = "PB1";
+
+GPIO3.$name                              = "GPIO_ENC_B";
+GPIO3.associatedPins.create(2);
+GPIO3.associatedPins[0].$name            = "ENC_B_A";
+GPIO3.associatedPins[0].pin.$assign      = "PA17";
+GPIO3.associatedPins[0].direction        = "INPUT";
+GPIO3.associatedPins[0].internalResistor = "PULL_UP";
+GPIO3.associatedPins[0].interruptEn      = true;
+GPIO3.associatedPins[0].polarity         = "RISE_FALL";
+GPIO3.associatedPins[1].$name            = "ENC_B_B";
+GPIO3.associatedPins[1].pin.$assign      = "PA24";
+GPIO3.associatedPins[1].direction        = "INPUT";
+GPIO3.associatedPins[1].internalResistor = "PULL_UP";
+GPIO3.associatedPins[1].interruptEn      = true;
+GPIO3.associatedPins[1].polarity         = "RISE_FALL";
+
+const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+PWM1.timerStartTimer            = true;
+PWM1.timerCount                 = 4000;
+PWM1.$name                      = "PWM_TB6612";
+PWM1.peripheral.ccp0Pin.$assign = "PB15";
+PWM1.peripheral.ccp1Pin.$assign = "PB16";
+
+SYSCTL.forceDefaultClkConfig = true;
+
+UART1.$name                    = "UART_0";
+UART1.targetBaudRate           = 115200;
+UART1.peripheral.rxPin.$assign = "PA11";
+UART1.peripheral.txPin.$assign = "PA10";
+
+Board.peripheral.$suggestSolution          = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution = "PA20";
+Board.peripheral.swdioPin.$suggestSolution = "PA19";
+PWM1.peripheral.$suggestSolution           = "TIMG8";
