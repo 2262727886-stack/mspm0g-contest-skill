@@ -356,6 +356,63 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | ADC | TCRT5000 ×5 | PA24~PA28 (5通道) |
 | TIMG 编码器 | MG310 ×2 + EC11 | 不同TIMG实例 |
 
+### 25E 竞赛拓展板引脚分配 (用户实测)
+
+以下引脚表为 25E 竞赛拓展板实际分配，**生成代码时必须使用此表而非默认推荐引脚**。
+
+| 外设功能 | 芯片/模块 | 天猛星引脚 | 片上复用 | 备注 |
+|----------|----------|-----------|----------|------|
+| **OLED SCL** | SSD1306 | PA31 | I2C0_SCL | I2C0总线 |
+| **OLED SDA** | SSD1306 | PA28 | I2C0_SDA | 地址 0x3C |
+| **MPU6050 SCL** | MPU6050 | PA11 | I2C1_SCL | **独立于OLED的总线** |
+| **MPU6050 SDA** | MPU6050 | PA10 | I2C1_SDA | 地址 0x68 |
+| **TB6612 PWMA** | TB6612FNG | PB15 | TIMG8_C0 | 左电机 PWM |
+| **TB6612 PWMB** | TB6612FNG | PB16 | TIMG8_C1 | 右电机 PWM |
+| **TB6612 AIN1** | TB6612FNG | PA13 | GPIO | 左电机方向1 |
+| **TB6612 AIN2** | TB6612FNG | PA12 | GPIO | 左电机方向2 |
+| **TB6612 BIN1** | TB6612FNG | PB0 | GPIO | 右电机方向1 |
+| **TB6612 BIN2** | TB6612FNG | PB1 | GPIO | 右电机方向2 |
+| **电机A 编码器 A相** | MG310 | PA15 | TIMA1_CH0 | ⚠️ TIMA1可能不支持QEI |
+| **电机A 编码器 B相** | MG310 | PA16 | TIMA1_CH1 | 需SysConfig验证 |
+| **电机B 编码器 A相** | MG310 | PA17 | TIMG7_CH0 | TIMG7编码器模式 |
+| **电机B 编码器 B相** | MG310 | PA24 | TIMG7_CH1 | |
+| **舵机1** | SG90/MG996R | PB9 | TIMA0_CH1 | 50Hz PWM |
+| **舵机2** | SG90/MG996R | PB8 | TIMA0_CH0 | 50Hz PWM |
+| **超声波 TRIG** | HC-SR04 | PA8 | GPIO OUT | |
+| **超声波 ECHO** | HC-SR04 | PA9 | GPIO IN | 输入捕获 |
+| **蓝牙 RX** | HC-05/06 | PB6 | USART1_TX | ⚠️ 接收蓝牙数据 |
+| **蓝牙 TX** | HC-05/06 | PB7 | USART1_RX | ⚠️ 发送给蓝牙 |
+| **K230 通信 TX** | ← M0G | PB2 | USART3_TX | ⚠️ 需验证UART3存在 |
+| **K230 通信 RX** | → M0G | PB3 | USART3_RX | 与K230 GPIO11/12对接 |
+| **TCRT5000 ×8** | 红外循迹 | PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7 | ADC | 8路ADC |
+| **蜂鸣器** | 有源蜂鸣器 | PB17 | GPIO | |
+| **LED** | 红色LED | PB27 | GPIO | |
+| **按键 K1** | 轻触按键 | PA26 | GPIO IN | 上拉,按下=低 |
+| **按键 K2** | 轻触按键 | PA25 | GPIO IN | |
+| **CH340 串口** | 调试/USB | PA0(TX), PA1(RX) | UART0 | 🔒 板载固定 |
+
+**信号冲突检查 (拓展板)：**
+
+| 总线 | 设备 | 地址/通道 | 状态 |
+|------|------|----------|------|
+| I2C0 | OLED | 0x3C | ✅ 独占 |
+| I2C1 | MPU6050 | 0x68 | ✅ 独占（与OLED分离） |
+| TIMA0 | 舵机×2 (CH0,CH1) | PB8, PB9 | ✅ |
+| TIMA1 | 电机A编码器 (CH0,CH1) | PA15, PA16 | ⚠️ 需验证 |
+| TIMG7 | 电机B编码器 (CH0,CH1) | PA17, PA24 | ✅ |
+| TIMG8 | TB6612 PWMA/PWMB | PB15, PB16 | ✅ |
+| UART0 | CH340 调试 | PA0, PA1 | 🔒 |
+| UART1 | 蓝牙 HC-05/06 | PB6, PB7 | ✅ |
+| UART3 | K230 通信 | PB2, PB3 | ⚠️ 需SysConfig验证 |
+
+**⚠️ 需 SysConfig 验证的问题：**
+
+| # | 问题 | 影响 | 解决方案 |
+|---|------|------|----------|
+| **1** | **TIMA1 编码器模式** | 电机A编码器可能无法用QEI | 若TIMA不支持编码器，改用 GPIO 双边沿中断 PA15/PA16 |
+| **2** | **UART3 是否存在** | K230通信可能无法用USART3 | 若不存在，把蓝牙移到 UART3(GPIO)，K230占用 UART1(PB4=TX/PB5=RX) |
+| **3** | **PB6=USART1_TX 验证** | 蓝牙发送引脚 | 天猛星引脚表显示 PB4=UART1_TX, PB6=UART1_RX。需确认拓展板实际能否将 PB6 复用为 TX |
+
 ---
 
 ## 四、CCS 工程配置
@@ -2735,13 +2792,19 @@ pl.destroy()
 ```
 
 **双芯硬件连接：**
-| K230 (庐山派) | MSPM0G (天猛星) | 说明 |
-|---------------|-----------------|------|
-| GPIO11 (UART2_TXD) | PA1 (UART0_RX) | 视觉→控制 数据 |
-| GPIO12 (UART2_RXD) | PA0 (UART0_TX) | 可选ACK回传 |
-| GND | GND | 必须共地 |
-| 独立电池 5V | 独立电池 7.4V | 供电隔离 |
-| ⚠️ **重要** | PA0/PA1 与 CH340 共用 | 竞赛时拔掉 USB 即可用 K230 通信 |
+
+> **默认方案 (USB拔插)**：K230 GPIO11/12 → M0G PA1/PA0 (竞赛时拔USB)
+>
+> **拓展板方案 (专用UART3)**：K230 GPIO11/12 → M0G PB3/PB2 (USART3, 不占用CH340)
+
+| K230 (庐山派) | MSPM0G 拓展板 | 方案 | 说明 |
+|---------------|--------------|------|------|
+| GPIO11 (UART2_TXD) | PB3 (USART3_RX) | 拓展板 | 视觉→控制 |
+| GPIO12 (UART2_RXD) | PB2 (USART3_TX) | 拓展板 | 可选ACK |
+| GPIO11 (UART2_TXD) | PA1 (UART0_RX) | 默认 | 需拔USB |
+| GPIO12 (UART2_RXD) | PA0 (UART0_TX) | 默认 | 需拔USB |
+| GND | GND | 通用 | 必须共地 |
+| 独立电池 5V | 独立电池 7.4V | 通用 | 供电隔离 |
 
 **⚠️ K230 启动前必须配置 FPIOA：**
 ```python
