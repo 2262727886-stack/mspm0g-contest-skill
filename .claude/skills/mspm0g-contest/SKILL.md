@@ -89,6 +89,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
   - `DL_I2C_startControllerTransfer(i2c, dir, len)` 缺地址参数 — 正确: `DL_I2C_startControllerTransfer(i2c, addr, dir, len)` (4参数)
   - `DL_TimerG_setPeriod()` — 不存在, 周期在 SysConfig 中设置
   - `DL_TimerG_getCounterValue()` — 不存在, 正确: `DL_TimerG_getTimerCount()` (= `DL_Timer_getTimerCount`)
+  - `DL_SPI_transferBlocking()` — 不存在, 正确: `DL_SPI_transmitDataBlocking8/16/32()` + `DL_SPI_receiveDataBlocking8/16/32()`
 - **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---
@@ -944,14 +945,15 @@ void oled_write_data_buf(uint8_t *data, uint16_t len) {
 
 ### --- SPI ---
 
-**主机模式发送：**
+**主机模式发送 (拓展板未使用)：**
 ```c
-void spi_init(void) {
-    // SysConfig: SPI0 → 主机模式 → CPOL=0, CPHA=0 → 最高 32MHz
+// SysConfig: SPI0 → Controller → CPOL=0, CPHA=0
+// 正确API: DL_SPI_transmitDataBlocking8 (不是 transferBlocking)
+void spi_write_byte(uint8_t data) {
+    DL_SPI_transmitDataBlocking8(SPI0, data);
 }
-
-void spi_transfer(uint8_t *tx, uint8_t *rx, uint16_t len) {
-    DL_SPI_transferBlocking(SPI0, tx, rx, len);
+uint8_t spi_read_byte(void) {
+    return DL_SPI_receiveDataBlocking8(SPI0);
 }
 ```
 
