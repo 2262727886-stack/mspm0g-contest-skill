@@ -13,7 +13,8 @@ C_SRCS += \
 ./ti_msp_dl_config.c \
 C:/ti/mspm0_sdk_2_10_00_04/source/ti/devices/msp/m0p/startup_system_files/ticlang/startup_mspm0g350x_ticlang.c \
 ../encoder.c \
-../motor.c 
+../motor.c \
+../pid.c 
 
 GEN_CMDS += \
 ./device_linker.cmd 
@@ -28,7 +29,8 @@ C_DEPS += \
 ./ti_msp_dl_config.d \
 ./startup_mspm0g350x_ticlang.d \
 ./encoder.d \
-./motor.d 
+./motor.d \
+./pid.d 
 
 GEN_OPTS += \
 ./device.opt 
@@ -38,7 +40,8 @@ OBJS += \
 ./ti_msp_dl_config.o \
 ./startup_mspm0g350x_ticlang.o \
 ./encoder.o \
-./motor.o 
+./motor.o \
+./pid.o 
 
 GEN_MISC_FILES += \
 ./device.cmd.genlibs \
@@ -50,7 +53,8 @@ OBJS__QUOTED += \
 "ti_msp_dl_config.o" \
 "startup_mspm0g350x_ticlang.o" \
 "encoder.o" \
-"motor.o" 
+"motor.o" \
+"pid.o" 
 
 GEN_MISC_FILES__QUOTED += \
 "device.cmd.genlibs" \
@@ -62,7 +66,8 @@ C_DEPS__QUOTED += \
 "ti_msp_dl_config.d" \
 "startup_mspm0g350x_ticlang.d" \
 "encoder.d" \
-"motor.d" 
+"motor.d" \
+"pid.d" 
 
 GEN_FILES__QUOTED += \
 "device_linker.cmd" \
@@ -74,7 +79,8 @@ C_SRCS__QUOTED += \
 "./ti_msp_dl_config.c" \
 "C:/ti/mspm0_sdk_2_10_00_04/source/ti/devices/msp/m0p/startup_system_files/ticlang/startup_mspm0g350x_ticlang.c" \
 "../encoder.c" \
-"../motor.c" 
+"../motor.c" \
+"../pid.c" 
 
 SYSCFG_SRCS__QUOTED += \
 "../empty.syscfg" 
