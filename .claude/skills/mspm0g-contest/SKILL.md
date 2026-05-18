@@ -296,34 +296,37 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 | 硬件模块 | 型号/规格 | 天猛星引脚 | 说明 |
 |----------|----------|-----------|------|
-| **TB6612 PWMA** | 电机驱动 | PB0 (TIMA0_C2) | 左电机PWM, 20kHz |
-| **TB6612 AIN1** | | PA7 | 左电机方向1 |
-| **TB6612 AIN2** | | PA14 | 左电机方向2 |
-| **TB6612 PWMB** | | PB1 (TIMA0_C3) | 右电机PWM |
-| **TB6612 BIN1** | | PA15 | 右电机方向1 |
-| **TB6612 BIN2** | | PA18 | 右电机方向2 |
+| **TB6612 PWMA** | 电机驱动 | PB15 (TIMG8_C0) | 左电机PWM, 20kHz |
+| **TB6612 PWMB** | | PB16 (TIMG8_C1) | 右电机PWM |
+| **TB6612 AIN1** | | PA13 | 左电机方向1 |
+| **TB6612 AIN2** | | PA12 | 左电机方向2 |
+| **TB6612 BIN1** | | PB0 | 右电机方向1 |
+| **TB6612 BIN2** | | PB1 | 右电机方向2 |
 | **TB6612 STBY** | | 3.3V | 使能 |
 | **TB6612 VM** | | 电池 7.4V | 电机电源 |
 | **TB6612 VCC** | | 3.3V | 逻辑电源 |
-| **MG310 编码器A** | 电机编码器 | PB2 (TIMG) | AB相A信号 |
-| **MG310 编码器B** | | PB3 (TIMG) | AB相B信号 |
-| **TCRT5000 ×5** | 红外循迹 | PA24~PA28 (ADC) | 5路模拟值 |
-| **MPU6050 SDA** | 六轴陀螺仪 | PA28 (I2C0_SDA) | I2C总线 |
-| **MPU6050 SCL** | | PA31 (I2C0_SCL) | |
-| **OLED SDA** | 0.96" SSD1306 | PA28 (I2C0_SDA) | 与MPU6050同总线 |
+| **MG310 编码器A-A** | 电机编码器 | PA15 (GPIO中断) | 双边沿中断 |
+| **MG310 编码器A-B** | | PA16 (GPIO中断) | 双边沿中断 |
+| **MG310 编码器B-A** | 电机编码器 | PA17 (TIMG7_CH0) | TIMG7正交编码 |
+| **MG310 编码器B-B** | | PA24 (TIMG7_CH1) | |
+| **TCRT5000 ×8** | 红外循迹 | PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7 | 8路ADC |
+| **MPU6050 SDA** | 六轴陀螺仪 | PA10 (I2C1_SDA) | **独立I2C1总线** |
+| **MPU6050 SCL** | | PA11 (I2C1_SCL) | |
+| **OLED SDA** | 0.96" SSD1306 | PA28 (I2C0_SDA) | I2C0总线 |
 | **OLED SCL** | | PA31 (I2C0_SCL) | |
-| **舵机1 Pan** | SG90/MG996R | PA8 (TIMA1_C0) | 50Hz, 500~2500us |
-| **舵机2 Tilt** | SG90/MG996R | PA9 (TIMA1_C1) | 50Hz |
-| **激光笔** | 蓝紫405nm ≤10mW | PA10 (MOS驱动) | GPIO控制MOS开关 |
-| **蜂鸣器** | 有源蜂鸣器 | PA11 | GPIO直接驱动 |
-| **LED 指示** | 红色LED | PA10 (共用) | 串电阻限流 |
-| **EC11 A相** | 旋转编码器 | PB2 | 双边沿中断 |
-| **EC11 B相** | | PB3 | |
-| **EC11 按键** | | PB4 | |
-| **矩阵按键 行** | 4×4 | PB8~PB11 | 输出 |
-| **矩阵按键 列** | | PB12~PB15 | 输入,内部下拉 |
-| **CH340 串口** | 调试/USB | PA0(TX), PA1(RX) | 板载固定不可改 |
-| **SWD 调试** | XDS110 | PA19(SWDIO), PA20(SWCLK) | 调试接口 |
+| **舵机1** | SG90/MG996R | PB9 (TIMA0_CH1) | 50Hz PWM |
+| **舵机2** | SG90/MG996R | PB8 (TIMA0_CH0) | 50Hz PWM |
+| **激光笔** | 蓝紫405nm | 待分配 | GPIO控制MOS |
+| **蜂鸣器** | 有源蜂鸣器 | PB17 | GPIO |
+| **LED 指示** | 红色LED | PB27 | GPIO |
+| **按键 K1** | 轻触按键 | PA26 | 上拉 |
+| **按键 K2** | 轻触按键 | PA25 | 上拉 |
+| **蓝牙 RX** | HC-05/06 | PB6 (USART1_TX) | |
+| **蓝牙 TX** | HC-05/06 | PB7 (USART1_RX) | |
+| **K230 通信 TX** | → K230 | PB2 (USART3_TX) | 视觉数据 |
+| **K230 通信 RX** | ← K230 | PB3 (USART3_RX) | |
+| **CH340 串口** | 调试/USB | PA0(TX), PA1(RX) | 🔒 板载固定 |
+| **SWD 调试** | XDS110 | PA19(SWDIO), PA20(SWCLK) | 🔒 调试接口 |
 
 ### K230 端硬件引脚总表
 
@@ -361,10 +364,13 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | 总线 | 设备 | 地址/通道 |
 |------|------|----------|
 | I2C0 | MPU6050 + OLED | 0x68 + 0x3C (不同地址, 可共存) |
-| TIMA0 PWM | TB6612 (ch0,ch1) | PB0, PB1 |
-| TIMA1 PWM | 舵机 ×2 (ch0,ch1) | PA8, PA9 |
-| ADC | TCRT5000 ×5 | PA24~PA28 (5通道) |
-| TIMG 编码器 | MG310 ×2 + EC11 | 不同TIMG实例 |
+| TIMG8 PWM | TB6612 (ch0,ch1) | PB15, PB16 |
+| TIMA0 PWM | 舵机 ×2 (ch0,ch1) | PB8, PB9 |
+| I2C0 | OLED SSD1306 | 0x3C |
+| I2C1 | MPU6050 | 0x68 |
+| ADC | TCRT5000 ×8 | PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7 |
+| TIMG7 编码器 | MG310 电机B | PA17, PA24 |
+| GPIO 中断 | MG310 电机A | PA15, PA16 |
 
 ### 25E 竞赛拓展板引脚分配 (用户实测)
 
@@ -611,38 +617,38 @@ int main(void) {
 
 ### --- GPIO ---
 
-**数字输出 (LED/继电器)：**
+**数字输出 (LED/蜂鸣器)：**
 ```c
-// ⚠️ 天猛星: PA2~PA6 为时钟引脚, PA0/PA1 被 CH340 占用, 请用 PA7/PA14/PA15 等
+// 25E 拓展板: LED=PB27, 蜂鸣器=PB17
 #include "ti_msp_dl_config.h"
 
 void gpio_output_init(void) {
-    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_7, DL_GPIO_OUTPUT);
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);  // 初始低电平
+    DL_GPIO_setDirection(GPIOB, DL_GPIO_PIN_27, DL_GPIO_OUTPUT);
+    DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27);  // 初始低电平
 }
 
-#define LED_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7)
-#define LED_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7)
-#define LED_TOGGLE() DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_7)
+#define LED_ON()   DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_27)
+#define LED_OFF()  DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27)
+#define LED_TOGGLE() DL_GPIO_togglePins(GPIOB, DL_GPIO_PIN_27)
 ```
 
 **数字输入 (按键)：**
 ```c
 void gpio_input_init(void) {
-    // PA14 = 按键, 内部上拉
-    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_14, DL_GPIO_INPUT);
-    DL_GPIO_setInternalResistor(GPIOA, DL_GPIO_PIN_14, DL_GPIO_RESISTOR_PULL_UP);
+    // 25E 拓展板: K1=PA26, K2=PA25, 内部上拉
+    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_26, DL_GPIO_INPUT);
+    DL_GPIO_setDigitalInternalResistor(PINCM26, DL_GPIO_RESISTOR_PULL_UP);
 }
 
-uint32_t key_state = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14);
+uint32_t key_state = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26);
 ```
 
 **GPIO 中断 (按键触发)：**
 ```c
 void GROUP1_IRQHandler(void) {
-    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_14);
-    if (status & DL_GPIO_PIN_14) {
-        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_14);
+    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_26);
+    if (status & DL_GPIO_PIN_26) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_26);
         // 处理按键事件 — 置标志位
     }
 }
@@ -650,44 +656,69 @@ void GROUP1_IRQHandler(void) {
 
 ### --- Timer (TIMG) ---
 
-**PWM 输出 (电机调速 / LED 调光)：**
+**PWM 输出 (TB6612 电机调速)：**
 ```c
-// 使用 TIMG0, 时钟 80MHz, 目标 PWM 频率 20kHz
-// Period = 80MHz / 20kHz = 4000
-// 使用 SysConfig 配置：TIMG0 → PWM 模式 → 选择引脚 → period=4000
+// 25E 拓展板: PWMA=PB15(TIMG8_C0), PWMB=PB16(TIMG8_C1)
+// 时钟 80MHz, 目标 PWM 频率 20kHz → Period = 4000
+// SysConfig: TIMG8 → PWM 模式 → PB15=CH0, PB16=CH1 → period=4000
 void pwm_init(void) {
-    // SysConfig 自动生成以下配置，手动等效代码：
-    DL_TimerG_setPeriod(TIMG0, 4000);          // 20kHz PWM
-    DL_TimerG_setCaptureCompareValue(TIMG0, 0, 2000); // 50% 占空比
-    DL_TimerG_startCounter(TIMG0);
+    DL_TimerG_setPeriod(TIMG8, 4000);          // 20kHz PWM
+    DL_TimerG_setCaptureCompareValue(TIMG8, 0, 2000); // CH0 50%
+    DL_TimerG_setCaptureCompareValue(TIMG8, 1, 2000); // CH1 50%
+    DL_TimerG_startCounter(TIMG8);
 }
 
-void pwm_set_duty(uint32_t duty) { // duty: 0~period
-    DL_TimerG_setCaptureCompareValue(TIMG0, 0, duty);
+void pwm_set_duty(uint32_t ch, uint32_t duty) { // ch=0/1, duty: 0~4000
+    DL_TimerG_setCaptureCompareValue(TIMG8, ch, duty);
 }
 ```
 
-**编码器读取 (AB 相正交编码)：**
+**编码器B 读取 (TIMG7 AB 相正交编码, PA17/PA24)：**
 ```c
-// SysConfig: TIMG1 → Encoder Mode → A/B 相引脚
-volatile int32_t encoder_count = 0;
+// 25E 拓展板: 电机B编码器=PA17(TIMG7_CH0), PA24(TIMG7_CH1)
+// SysConfig: TIMG7 → Encoder Mode → A=PA17, B=PA24
+volatile int32_t encoder_b_count = 0;
 
-void encoder_init(void) {
-    // SysConfig 会自动配置 TIMG 为编码器模式
-    DL_TimerG_startCounter(TIMG1);
+void encoder_b_init(void) {
+    DL_TimerG_startCounter(TIMG7);
 }
 
-int32_t encoder_read(void) {
-    return (int32_t)DL_TimerG_getCounterValue(TIMG1);
+int32_t encoder_b_read(void) {
+    return (int32_t)DL_TimerG_getTimerCount(TIMG7);
 }
 
-// 定时读取速度（放在定时器中断中）：
-void TIMER_IRQHandler(void) {
-    static int32_t last_count = 0;
-    int32_t cur = (int32_t)DL_TimerG_getCounterValue(TIMG1);
-    int32_t speed = cur - last_count;  // 单位：编码器脉冲/采样周期
-    last_count = cur;
-    encoder_count += speed;
+void TIMG7_IRQHandler(void) {
+    static int32_t last = 0;
+    int32_t cur = (int32_t)DL_TimerG_getTimerCount(TIMG7);
+    encoder_b_count += (cur - last);
+    last = cur;
+}
+```
+
+**编码器A 读取 (GPIO 双边沿中断, PA15/PA16)：**
+```c
+// 25E 拓展板: 电机A编码器=PA15(A相), PA16(B相)
+// TIMA1不支持QEI, 用 GPIO 双边沿中断软件解码
+// SysConfig: PA15/PA16 → GPIO Input → Both Edge Interrupt
+volatile int32_t encoder_a_count = 0;
+
+void GROUP1_IRQHandler(void) {
+    uint32_t st = DL_GPIO_getEnabledInterruptStatus(GPIOA,
+                    DL_GPIO_PIN_15 | DL_GPIO_PIN_16);
+    static uint8_t last_a = 0, last_b = 0;
+    uint8_t a = (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_15) != 0);
+    uint8_t b = (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_16) != 0);
+
+    if (st & DL_GPIO_PIN_15) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_15);
+        if (a == b) encoder_a_count++;
+        else        encoder_a_count--;
+    }
+    if (st & DL_GPIO_PIN_16) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_16);
+        if (a != b) encoder_a_count++;
+        else        encoder_a_count--;
+    }
 }
 ```
 
@@ -777,24 +808,35 @@ void UART0_INST_IRQHandler(void) {
 
 ### --- I2C ---
 
-**0.96" OLED (SSD1306) 驱动基础：**
+**0.96" OLED (SSD1306 I2C0) 驱动：**
 ```c
+// 25E 拓展板: OLED 在 I2C0 (PA28=SDA, PA31=SCL)
 #define OLED_ADDR 0x3C
 
-void i2c_init(void) {
-    // SysConfig: I2C0(PA28=SDA,PA31=SCL) → 主机模式 → 400kHz (Fast Mode)
-    DL_I2C_setPeripheralMode(I2C0, DL_I2C_PERIPHERAL_MODE_CONTROLLER);
+void i2c0_init(void) {
+    // SysConfig: I2C0(PA28=SDA,PA31=SCL) → Controller → 400kHz
 }
 
 void oled_write_cmd(uint8_t cmd) {
-    uint8_t buf[2] = {0x00, cmd};  // Co=0, D/C#=0
-    DL_I2C_transmitBlocking(I2C0, OLED_ADDR, buf, 2);
+    uint8_t buf[2] = {0x00, cmd};
+    DL_I2C_fillControllerTXFIFO(I2C0, buf, 2);
+    DL_I2C_startControllerTransfer(I2C0, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
+    while (DL_I2C_isBusy(I2C0));
+    DL_I2C_sendControllerStop(I2C0);
 }
 
-void oled_write_data(uint8_t *data, uint16_t len) {
-    while (len--) {
-        uint8_t buf[2] = {0x40, *data++};  // Co=0, D/C#=1
-        DL_I2C_transmitBlocking(I2C0, OLED_ADDR, buf, 2);
+void oled_write_data_buf(uint8_t *data, uint16_t len) {
+    while (len) {
+        uint8_t buf[65];  // 64字节数据 + 1控制字节
+        uint16_t chunk = len > 64 ? 64 : len;
+        buf[0] = 0x40;
+        memcpy(buf + 1, data, chunk);
+        DL_I2C_fillControllerTXFIFO(I2C0, buf, chunk + 1);
+        DL_I2C_startControllerTransfer(I2C0, DL_I2C_CONTROLLER_DIRECTION_TX, chunk + 1);
+        while (DL_I2C_isBusy(I2C0));
+        DL_I2C_sendControllerStop(I2C0);
+        data += chunk;
+        len -= chunk;
     }
 }
 ```
@@ -815,8 +857,9 @@ void spi_transfer(uint8_t *tx, uint8_t *rx, uint16_t len) {
 ### --- HC-SR04 超声波测距 ---
 
 ```c
-// SysConfig: TIMG2 → Input Capture 模式 → 一个引脚做 TRIG (GPIO), 一个做 ECHO (捕获)
-#define TRIG_PIN  DL_GPIO_PIN_15  // PA15 (PA4为时钟引脚,不能用)
+// 25E 拓展板: TRIG=PA8(GPIO OUT), ECHO=PA9(GPIO IN 输入捕获)
+// SysConfig: TIMG12 → Input Capture → PA9=ECHO
+#define TRIG_PIN  DL_GPIO_PIN_8
 #define TRIG_PORT GPIOA
 
 volatile uint32_t echo_start = 0;
@@ -829,21 +872,21 @@ void hcsr04_trigger(void) {
     DL_GPIO_clearPins(TRIG_PORT, TRIG_PIN);
 }
 
-// 输入捕获中断 (ECHO 引脚双边沿捕获)
-void TIMG2_IRQHandler(void) {
-    uint32_t status = DL_TimerG_getPendingInterrupt(TIMG2);
+// 输入捕获中断 (ECHO=PA9 双边沿捕获)
+void TIMG12_IRQHandler(void) {
+    uint32_t status = DL_TimerG_getPendingInterrupt(TIMG12);
     if (status & DL_TIMERG_IIDX_CAPTURE_C0) {
         static bool rising = true;
         if (rising) {
-            echo_start = DL_TimerG_getCaptureCompareValue(TIMG2, 0);
-            DL_TimerG_setCaptureEdge(TIMG2, 0, DL_TIMER_CAPTURE_EDGE_FALLING);
+            echo_start = DL_TimerG_getCaptureCompareValue(TIMG12, 0);
+            DL_TimerG_setCaptureEdge(TIMG12, 0, DL_TIMER_CAPTURE_EDGE_FALLING);
         } else {
-            echo_end = DL_TimerG_getCaptureCompareValue(TIMG2, 0);
+            echo_end = DL_TimerG_getCaptureCompareValue(TIMG12, 0);
             echo_done = true;
-            DL_TimerG_setCaptureEdge(TIMG2, 0, DL_TIMER_CAPTURE_EDGE_RISING);
+            DL_TimerG_setCaptureEdge(TIMG12, 0, DL_TIMER_CAPTURE_EDGE_RISING);
         }
         rising = !rising;
-        DL_TimerG_clearInterruptStatus(TIMG2, DL_TIMERG_IIDX_CAPTURE_C0);
+        DL_TimerG_clearInterruptStatus(TIMG12, DL_TIMERG_IIDX_CAPTURE_C0);
     }
 }
 
@@ -858,9 +901,10 @@ float hcsr04_get_distance_cm(void) {
 }
 ```
 
-### --- MPU6050 完整驱动 (I2C) ---
+### --- MPU6050 完整驱动 (I2C1) ---
 
 ```c
+// 25E 拓展板: MPU6050 在 I2C1 (PA10=SDA, PA11=SCL), 独立于 OLED 的 I2C0
 #define MPU6050_ADDR  0x68
 #define MPU6050_PWR_MGMT_1   0x6B
 #define MPU6050_ACCEL_XOUT_H 0x3B
@@ -870,32 +914,35 @@ float hcsr04_get_distance_cm(void) {
 #define MPU6050_GYRO_CONFIG  0x1B
 #define MPU6050_ACCEL_CONFIG 0x1C
 
-// I2C 基础读写
+// I2C1 基础读写
 void mpu6050_write_reg(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = {reg, val};
-    DL_I2C_transmitBlocking(I2C0, MPU6050_ADDR, buf, 2);
+    DL_I2C_fillControllerTXFIFO(I2C1, buf, 2);
+    DL_I2C_startControllerTransfer(I2C1, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
+    while (DL_I2C_isBusy(I2C1));
+    DL_I2C_sendControllerStop(I2C1);
 }
 
 uint8_t mpu6050_read_reg(uint8_t reg) {
     uint8_t val = 0;
-    DL_I2C_transmitBlocking(I2C0, MPU6050_ADDR, &reg, 1);
-    DL_I2C_receiveBlocking(I2C0, MPU6050_ADDR, &val, 1);
+    DL_I2C_fillControllerTXFIFO(I2C1, &reg, 1);
+    DL_I2C_startControllerTransfer(I2C1, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
+    while (DL_I2C_isBusy(I2C1));
+    DL_I2C_startControllerTransfer(I2C1, DL_I2C_CONTROLLER_DIRECTION_RX, 1);
+    while (DL_I2C_isBusy(I2C1));
+    val = DL_I2C_receiveControllerData(I2C1);
+    DL_I2C_sendControllerStop(I2C1);
     return val;
 }
 
-void mpu6050_read_data(uint8_t start_reg, uint8_t *buf, uint8_t len) {
-    DL_I2C_transmitBlocking(I2C0, MPU6050_ADDR, &start_reg, 1);
-    DL_I2C_receiveBlocking(I2C0, MPU6050_ADDR, buf, len);
-}
-
-// 初始化: 唤醒, ±2000°/s, ±4g, 1kHz 采样
+// 初始化: 唤醒, ±2000°/s, ±8g, 1kHz 采样
 void mpu6050_init(void) {
     mpu6050_write_reg(MPU6050_PWR_MGMT_1, 0x00);
     delay_ms(100);
     mpu6050_write_reg(MPU6050_SMPLRT_DIV, 0x00);
     mpu6050_write_reg(MPU6050_CONFIG, 0x00);
-    mpu6050_write_reg(MPU6050_GYRO_CONFIG, 0x18);   // ±2000°/s → 16.4 LSB/(°/s)
-    mpu6050_write_reg(MPU6050_ACCEL_CONFIG, 0x10);  // ±8g → 4096 LSB/g
+    mpu6050_write_reg(MPU6050_GYRO_CONFIG, 0x18);   // ±2000°/s
+    mpu6050_write_reg(MPU6050_ACCEL_CONFIG, 0x10);  // ±8g
 }
 
 typedef struct {
@@ -1285,9 +1332,12 @@ void opa_diff_init(void) {
 
 ---
 
-## 七、I2C 总线共享指南 (OLED + MPU6050)
+## 七、I2C 总线共享指南 (拓展板已物理分离)
 
-### 问题
+> **拓展板已将 OLED(I2C0) 和 MPU6050(I2C1) 分离到独立总线，不再需要软件调度。**
+> 以下内容适用于旧版同总线方案，仅作参考。
+
+### 旧版问题
 
 OLED (0x3C) 和 MPU6050 (0x68) 共用 I2C0，同时刷 OLED 和读 MPU6050 会阻塞总线。
 
@@ -1522,18 +1572,23 @@ void motor_speed_control(DC_Motor *motor, int32_t encoder_val, float dt) {
 }
 ```
 
-**舵机控制 (50Hz PWM, 500~2500us)：**
+**舵机控制 (TIMA0 50Hz PWM, 500~2500us)：**
 ```c
+// 25E 拓展板: 舵机1=PB9(TIMA0_CH1), 舵机2=PB8(TIMA0_CH0)
 // 20ms 周期 = 50Hz, 脉宽 0.5~2.5ms 对应 0°~180°
-// 80MHz/50Hz = 1,600,000 → 使用分频: 80MHz/64/50 = 25000
+// SysConfig: TIMA0 → PWM → PB8=CH0, PB9=CH1, period=25000
 #define SERVO_PERIOD  25000
-#define SERVO_MIN     625    // 0.5ms / 20us
-#define SERVO_MAX     3125   // 2.5ms / 20us
-#define SERVO_MID     1875   // 1.5ms / 20us
+#define SERVO_MIN     625    // 0.5ms 对应
+#define SERVO_MAX     3125   // 2.5ms 对应
+#define SERVO_MID     1875   // 1.5ms 对应 90°
 
-void servo_set_angle(uint32_t angle_deg) { // 0~180
+void servo1_set_angle(uint32_t angle_deg) { // 舵机1 PB9=CH1, 0~180
     uint32_t pulse = SERVO_MIN + (SERVO_MAX - SERVO_MIN) * angle_deg / 180;
-    DL_TimerG_setCaptureCompareValue(TIMG0, 0, pulse);
+    DL_TimerG_setCaptureCompareValue(TIMA0, 1, pulse);
+}
+void servo2_set_angle(uint32_t angle_deg) { // 舵机2 PB8=CH0, 0~180
+    uint32_t pulse = SERVO_MIN + (SERVO_MAX - SERVO_MIN) * angle_deg / 180;
+    DL_TimerG_setCaptureCompareValue(TIMA0, 0, pulse);
 }
 ```
 
@@ -2207,11 +2262,9 @@ SYSCTL: SYSOSC 32MHz (默认)
 
 ```c
 /**
- * 天猛星 MSPM0G3507 端到端测试工程
- * 功能: UART printf + PA7 LED闪烁 + PA14 按键中断 + I2C0 扫描
- * 引脚: PA0/1=UART, PA7=LED, PA14=KEY, PA28/31=I2C0
- * 编译: CCS → Ctrl+B → 生成 .out
- * 烧录: 用 XDS110 dslite flash
+ * 天猛星 MSPM0G3507 拓展板测试工程
+ * 功能: UART printf + PB27 LED + PA26按键 + I2C0/I2C1 扫描
+ * 引脚: PA0/1=UART0, PB27=LED, PA26=K1, PA28/31=I2C0(OLED), PA10/11=I2C1(MPU6050)
  */
 #include "ti_msp_dl_config.h"
 #include <stdio.h>
@@ -2230,17 +2283,16 @@ void delay_ms(uint32_t ms) {
     while ((g_ms_ticks - start) < ms) { __WFI(); }
 }
 
-/* ---- I2C0 扫描从设备 ---- */
-void i2c_scan(void) {
-    printf("I2C0 Scan: ");
+/* ---- I2C 扫描 ---- */
+void i2c_scan(DL_I2C_TypeDef *i2c) {
     for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-        DL_I2C_fillControllerTXFIFO(I2C0, &addr, 1);
-        DL_I2C_startControllerTransfer(I2C0, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-        while (DL_I2C_isBusy(I2C0));
-        if (!DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_ARB_LOST)) {
+        DL_I2C_fillControllerTXFIFO(i2c, &addr, 1);
+        DL_I2C_startControllerTransfer(i2c, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
+        while (DL_I2C_isBusy(i2c));
+        if (!DL_I2C_getControllerStatus(i2c, DL_I2C_CONTROLLER_STATUS_ARB_LOST)) {
             printf("0x%02X ", addr);
         }
-        DL_I2C_sendControllerStop(I2C0);
+        DL_I2C_sendControllerStop(i2c);
     }
     printf("\r\n");
 }
@@ -2253,43 +2305,44 @@ int main(void)
     __enable_irq();
 
     printf("\r\n========================================\r\n");
-    printf("  天猛星 MSPM0G3507 端到端测试\r\n");
-    printf("  UART0: PA0/PA1, LED: PA7, KEY: PA14\r\n");
-    printf("  I2C0: PA28(SDA)/PA31(SCL)\r\n");
+    printf("  天猛星 MSPM0G3507 拓展板测试\r\n");
+    printf("  UART0: PA0/PA1, LED: PB27, KEY: PA26\r\n");
+    printf("  I2C0(OLED): PA28/PA31, I2C1(MPU6050): PA10/PA11\r\n");
     printf("  MCLK: %lu Hz\r\n", SystemCoreClock);
     printf("========================================\r\n\r\n");
 
-    /* I2C0 扫描 (接 OLED=0x3C + MPU6050=0x68 应扫到两个地址) */
-    i2c_scan();
+    /* I2C 扫描 (I2C0=OLED 0x3C, I2C1=MPU6050 0x68) */
+    printf("I2C0: "); i2c_scan(I2C0);
+    printf("I2C1: "); i2c_scan(I2C1);
 
     uint32_t led_tick = 0, scan_tick = 0;
     uint8_t led_state = 0;
 
     while (1)
     {
-        /* 500ms LED 闪烁 */
+        /* 500ms LED 闪烁 (PB27) */
         if (g_ms_ticks - led_tick >= 500) {
             led_tick = g_ms_ticks;
             led_state = !led_state;
-            if (led_state) DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7);
-            else           DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);
+            if (led_state) DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_27);
+            else           DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27);
             printf("[%6lu] LED=%s\r\n", g_ms_ticks, led_state ? "ON" : "OFF");
         }
 
-        /* 按键检测 (PA14, 按下=低电平) */
-        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14) == 0) {
-            delay_ms(20);  /* 消抖 */
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14) == 0) {
-                printf("[%6lu] KEY PRESSED!\r\n", g_ms_ticks);
-                i2c_scan();  /* 按键触发重新扫描 I2C */
-                while (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_14) == 0);  /* 等松开 */
+        /* 按键检测 (K1=PA26, 按下=低电平) */
+        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26) == 0) {
+            delay_ms(20);
+            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26) == 0) {
+                printf("[%6lu] K1 PRESSED!\r\n", g_ms_ticks);
+                while (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26) == 0);
             }
         }
 
         /* 每 5 秒重新扫描 I2C */
         if (g_ms_ticks - scan_tick >= 5000) {
             scan_tick = g_ms_ticks;
-            i2c_scan();
+            printf("I2C0: "); i2c_scan(I2C0);
+            printf("I2C1: "); i2c_scan(I2C1);
         }
     }
 }
@@ -3206,10 +3259,10 @@ void differential_drive(float base_speed, float steer_output) {
     if (left_speed  > 1.0f) left_speed  = 1.0f;
     if (right_speed > 1.0f) right_speed = 1.0f;
 
-    // 写入 PWM 占空比
+    // 写入 PWM 占空比 (TIMG8: CH0=PB15左, CH1=PB16右)
     uint32_t period = 4000; // 20kHz
-    pwm_set_duty(left_speed * period);   // TIMG0 ch0 → 左电机
-    pwm_set_duty(right_speed * period);  // TIMG0 ch1 → 右电机
+    pwm_set_duty(0, left_speed * period);   // TIMG8_CH0 → 左电机
+    pwm_set_duty(1, right_speed * period);  // TIMG8_CH1 → 右电机
 }
 
 // 主控循环 (放在 1kHz 定时中断或主循环中)
@@ -3253,32 +3306,17 @@ void lap_detector_update(int32_t enc_left, int32_t enc_right, float dt) {
 ### --- 二维云台舵机控制 ---
 
 ```c
-// 双舵机: Pan(水平旋转), Tilt(俯仰)
-// 使用 TIMG0 ch2(Pan), ch3(Tilt) 或独立 TIMG
-#define PAN_CHANNEL   2
-#define TILT_CHANNEL  3
-
-// 舵机角度转 PWM 脉宽
-uint32_t servo_angle_to_pulse(float angle_deg, float min_deg, float max_deg) {
-    float ratio = (angle_deg - min_deg) / (max_deg - min_deg);
-    if (ratio < 0) ratio = 0; if (ratio > 1.0f) ratio = 1.0f;
-    return (uint32_t)(SERVO_MIN + (SERVO_MAX - SERVO_MIN) * ratio);
-}
-
+// 25E 拓展板: 舵机1=PB9(TIMA0_CH1, Pan), 舵机2=PB8(TIMA0_CH0, Tilt)
 void gimbal_set_pan(float angle_deg) {
-    uint32_t pulse = servo_angle_to_pulse(angle_deg, -90.0f, 90.0f);
-    DL_TimerG_setCaptureCompareValue(TIMG0, PAN_CHANNEL, pulse);
+    servo1_set_angle(angle_deg + 90);  // 映射 0~180
 }
-
 void gimbal_set_tilt(float angle_deg) {
-    uint32_t pulse = servo_angle_to_pulse(angle_deg, 0.0f, 60.0f);
-    DL_TimerG_setCaptureCompareValue(TIMG0, TILT_CHANNEL, pulse);
+    servo2_set_angle(angle_deg);       // 0~60 → 0~180
 }
 
-// 激光笔开关 (通过 GPIO + MOS/继电器)
-// PA10=激光MOS, PA11=蜂鸣器 (避开I2C0=PA12/PA13)
-#define LASER_ON()   DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_10)
-#define LASER_OFF()  DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_10)
+// 激光笔开关 (拓展板: 激光未专门分配, 可用 PB27 LED 位或 GPIO 扩展)
+// #define LASER_ON()   DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_27)
+// #define LASER_OFF()  DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27)
 ```
 
 ### --- 瞄准几何解算 ---
@@ -3623,29 +3661,30 @@ float compute_target_speed(float dist_to_stop, bool is_final_stop) {
     return MAX_SPEED * dist_to_stop / 40.0f;
 }
 
-// 刹车执行 (TB6612: AIN1=PA7, AIN2=PA14, BIN1=PA15, BIN2=PA18)
+// 刹车执行 (拓展板: AIN1=PA13, AIN2=PA12, BIN1=PB0, BIN2=PB1)
 void brake_now(void) {
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_7);    // AIN1=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_14);   // AIN2=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_15);   // BIN1=0
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_18);   // BIN2=0
-    pwm_set_duty(0);  // PWM=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_13);   // AIN1=0
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_12);   // AIN2=0
+    DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_0);    // BIN1=0
+    DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_1);    // BIN2=0
+    pwm_set_duty(0, 0);   // PWMA=0
+    pwm_set_duty(1, 0);   // PWMB=0
 }
 ```
 
 ### --- 声光指示 ---
 
 ```c
-#define BUZZER_PIN  DL_GPIO_PIN_11  // PA11 (避开I2C0=PA12/PA13)
-#define LED_PIN     DL_GPIO_PIN_10  // PA10 指示灯
+#define BUZZER_PIN  DL_GPIO_PIN_17  // PB17 蜂鸣器 (拓展板)
+#define LED_PIN     DL_GPIO_PIN_27  // PB27 LED (拓展板)
 
 void indicator_beep(uint8_t times, uint32_t duration_ms) {
     for (int i = 0; i < times; i++) {
-        DL_GPIO_setPins(GPIOA, BUZZER_PIN);  // 蜂鸣器
-        DL_GPIO_setPins(GPIOA, LED_PIN);     // LED
+        DL_GPIO_setPins(GPIOB, BUZZER_PIN);  // 蜂鸣器
+        DL_GPIO_setPins(GPIOB, LED_PIN);     // LED
         delay_ms(duration_ms);
-        DL_GPIO_clearPins(GPIOA, BUZZER_PIN);
-        DL_GPIO_clearPins(GPIOA, LED_PIN);
+        DL_GPIO_clearPins(GPIOB, BUZZER_PIN);
+        DL_GPIO_clearPins(GPIOB, LED_PIN);
         if (times > 1) delay_ms(150);
     }
 }
@@ -3678,18 +3717,18 @@ typedef enum {
 } MotorDirection;
 
 void motor_set_forward(void) {
-    // 硬件锁定前进方向 (TB6612: AIN1=PA7, BIN1=PA15)
-    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_7);    // AIN1=1
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_14); // AIN2=0
-    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_15);   // BIN1=1
-    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_18); // BIN2=0
+    // 拓展板: AIN1=PA13, AIN2=PA12, BIN1=PB0, BIN2=PB1
+    DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_13);   // AIN1=1
+    DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_12); // AIN2=0
+    DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_0);    // BIN1=1
+    DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_1);  // BIN2=0
 }
 
 // 安全封装: 差分驱动只调整占空比, 不动方向
 void safe_differential_drive(float left, float right) {
     motor_set_forward();  // 始终前进
-    pwm_set_duty((uint32_t)(left  * 4000));  // ch0
-    pwm_set_duty((uint32_t)(right * 4000));  // ch1
+    pwm_set_duty(0, (uint32_t)(left  * 4000));  // TIMG8_CH0=PB15
+    pwm_set_duty(1, (uint32_t)(right * 4000));  // TIMG8_CH1=PB16
 }
 ```
 
@@ -4185,12 +4224,12 @@ void green_main(void) {
 **TB6612 电机驱动：**
 | TB6612 | MSPM0G | 说明 |
 |--------|--------|------|
-| PWMA | PB0 (TIMA0_C2) | PWM, 20kHz |
-| AIN1 | PA7 | 方向 1 |
-| AIN2 | PA14 | 方向 2 |
-| PWMB | PB1 (TIMA0_C3) | PWM, 20kHz |
-| BIN1 | PA15 | 方向 1 |
-| BIN2 | PA18 | 方向 2 |
+| PWMA | PB15 (TIMG8_C0) | PWM, 20kHz |
+| PWMB | PB16 (TIMG8_C1) | PWM, 20kHz |
+| AIN1 | PA13 | 方向 1 |
+| AIN2 | PA12 | 方向 2 |
+| BIN1 | PB0 | 方向 1 |
+| BIN2 | PB1 | 方向 2 |
 | STBY | 3.3V | 使能 |
 | VM | 电池+ (7~12V) | 电机电源 |
 | VCC | 3.3V | 逻辑电源 |
