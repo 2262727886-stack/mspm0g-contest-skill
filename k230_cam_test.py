@@ -5,22 +5,45 @@ QVGA 320×240 采集, 640×480 IDE显示, SSD1306 OLED 状态屏
 from media.sensor import *
 from media.display import *
 from media.media import *
-from machine import I2C
-import time, os, gc
+from machine import I2C, UART, FPIOA
+import struct, time, os, gc
 
-# ===== 一、摄像头初始化 (顺序不可变) =====
+# ===== 一、FPIOA: UART2 → M0G =====
+fpioa = FPIOA()
+fpioa.set_function(11, FPIOA.UART2_TXD)  # K230 TX → M0G PB3 (UART3_RX)
+fpioa.set_function(12, FPIOA.UART2_RXD)  # K230 RX ← M0G PB2 (UART3_TX)
+
+# ===== 二、摄像头初始化 (顺序不可变) =====
 sensor = Sensor(width=1920, height=1080)
 sensor.reset()
-sensor.set_framesize(width=320, height=240)   # QVGA 高帧率
+sensor.set_framesize(width=320, height=240)
 sensor.set_pixformat(Sensor.RGB565)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
 
-Display.init(Display.VIRT, width=320, height=240, to_ide=True)  # 匹配采集, 满屏
+Display.init(Display.VIRT, width=320, height=240, to_ide=True)
 MediaManager.init()
 sensor.run()
 
-# ===== 二、OLED SSD1306 I2C0 (与GC2093共用, 64字节小包+重试防冲突) =====
+# ===== 三、UART2 K230→M0G =====
+uart = UART(UART.UART2, baudrate=115200,
+            bits=UART.EIGHTBITS, parity=UART.PARITY_NONE,
+            stop=UART.STOPBITS_ONE)
+last_uart_ms = 0
+
+def uart_send(cmd, x_cm, y_cm, extra=0):
+    """10字节帧: |A5|5A|CMD|X(2B小端)|Y(2B)|EXTRA(2B)|XOR|"""
+    buf = bytearray(10)
+    buf[0]=0xA5; buf[1]=0x5A; buf[2]=cmd
+    struct.pack_into('<h', buf, 3, int(x_cm*10))
+    struct.pack_into('<h', buf, 5, int(y_cm*10))
+    struct.pack_into('<H', buf, 7, extra & 0xFFFF)
+    cs = 0
+    for i in range(9): cs ^= buf[i]
+    buf[9] = cs
+    uart.write(buf)
+
+# ===== 四、OLED SSD1306 I2C0 =====
 OLED_ADDR = 0x3C
 OLED_W = 128; OLED_H = 64; OLED_PAGES = OLED_H // 8
 oled_fb = bytearray(OLED_W * OLED_PAGES)
@@ -94,17 +117,17 @@ def oled_str(x, y, s):
         cx += 6
         if cx > OLED_W - 6: cx = x; cy += 9
 
-# ===== 三、阈值 (自动校准填充) =====
+# ===== 五、阈值 (自动校准填充) =====
 TAPE_GRAY  = (0, 109)      # 黑胶带灰度, 启动后自动校准
 RED_TARGET = [(30, 90, 10, 127, -60, 60)]  # 红色靶心LAB, 启动后自动校准
 
-# ===== 四、A4 约束 =====
+# ===== 六、A4 约束 =====
 IW, IH = 320, 240
 A4_AREA_MIN = IW * IH * 0.03
 A4_AREA_MAX = IW * IH * 0.85
 STABLE_FRAMES = 3
 
-# ===== 五、检测状态 =====
+# ===== 七、检测状态 =====
 a4_corners = None; a4_ok = False; a4_stable = 0; a4_last = None
 target_ok = False; target_cx = 0; target_cy = 0
 tx_cm = 0.0; ty_cm = 0.0
@@ -145,7 +168,7 @@ def target_in_center(cx, cy, corners, m=0.3):
     mx=m*cw/2; my=m*ch/2; ccx=(min(xs)+max(xs))/2; ccy=(min(ys)+max(ys))/2
     return abs(cx-ccx)<cw/2-mx and abs(cy-ccy)<ch/2-my
 
-# ===== 六、自动阈值校准 (带验证) =====
+# ===== 八、自动阈值校准 (带验证) =====
 DEFAULT_TAPE  = (0, 100)      # 安全默认: 宽黑胶带范围
 DEFAULT_RED   = [(20, 90, 10, 127, -80, 80)]  # 安全默认: 宽红色范围
 
@@ -245,7 +268,7 @@ def auto_calibrate():
     oled_refresh()
     time.sleep_ms(1000)
 
-# ===== 八、OLED 启动画面 =====
+# ===== 九、OLED 启动画面 =====
 oled_init()
 oled_cls()
 oled_str(0, 0,  "K230 25E Test")
@@ -261,7 +284,7 @@ auto_calibrate()
 
 print("QVGA 320×240 + OLED, 开始检测...")
 
-# ===== 九、主循环 =====
+# ===== 十、主循环 =====
 try:
     while True:
         os.exitpoint()
@@ -313,6 +336,15 @@ try:
         else:
             img.draw_string_advanced(3, 3, 25, f"SEARCH {fps:.0f}fps", color=(255,0,0))
 
+        # ---- UART 发送 (每50ms) ----
+        now_ms = time.ticks_ms()
+        if time.ticks_diff(now_ms, last_uart_ms) > 50:
+            last_uart_ms = now_ms
+            if a4_ok:
+                uart_send(0x01, tx_cm, ty_cm, 0)  # CMD_TARGET
+            else:
+                uart_send(0x04, 0, 0, 0)           # CMD_LOST
+
         Display.show_image(img)
 
         # ---- OLED 刷新 (每20帧≈0.3s, 逐页写入防I2C乱序) ----
@@ -327,7 +359,7 @@ try:
                 oled_str(0, 12, "Target: ---")
                 oled_str(0, 26, "A4: search")
             oled_str(0, 42, "FPS:%.0f" % fps)
-            oled_str(0, 55, "UART: wait")
+            oled_str(0, 55, "UART->M0G")
             oled_refresh()
 
         if fc % 300 == 0:
