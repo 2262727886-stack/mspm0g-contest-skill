@@ -109,9 +109,6 @@ a4_corners = None; a4_ok = False; a4_stable = 0; a4_last = None
 target_ok = False; target_cx = 0; target_cy = 0
 tx_cm = 0.0; ty_cm = 0.0
 # 时间平滑 (EMA 低通滤波)
-lost_cnt = 0
-med_buf = []    # 5帧中值滤波
-disp_cx = 0; disp_cy = 0  # 显示位置 (带死区)
 clock = time.clock(); fc = 0
 
 def pixel_to_cm(px, py):
@@ -235,7 +232,7 @@ oled_init()
 oled_cls()
 oled_str(0, 0,  "K230 25E Test")
 oled_str(0, 12, "GC2093 QVGA")
-oled_str(0, 24, "A4 + RED Target")
+oled_str(0, 24, "A4 Geometric Ctrl")
 oled_str(0, 36, "OLED SSD1306")
 oled_str(0, 55, "I2C0 0x3C OK")
 oled_refresh()
@@ -278,72 +275,23 @@ try:
             cb = sum(c[1] for c in a4_corners)//4
             img.draw_cross(ca, cb, color=(0,0,255), size=10, thickness=2)
 
-        # ---- 红色靶心: get_statistics 直接算质心 (最稳定) ----
-        raw_ok = False; raw_cx = 0; raw_cy = 0
-        try:
-            if a4_ok and a4_corners:
-                xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=6
-                roi=(min(xs)+mg, min(ys)+mg, max(xs)-min(xs)-2*mg, max(ys)-min(ys)-2*mg)
-                stat = img.get_statistics(roi=roi, thresholds=RED_TARGET)
-            else:
-                stat = img.get_statistics(thresholds=RED_TARGET)
-
-            if stat.count() > 30:  # 足够多的红色像素
-                # stat.cx/cy = 阈值内像素的几何质心, 极稳
-                if a4_ok and not target_in_center(stat.cx(), stat.cy(), a4_corners, 0.4):
-                    pass
-                else:
-                    raw_cx = stat.cx(); raw_cy = stat.cy()
-                    raw_ok = True
-        except:
-            # 回退: find_blobs
-            if a4_ok and a4_corners:
-                xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=4
-                roi=(min(xs)+mg, min(ys)+mg, max(xs)-min(xs)-2*mg, max(ys)-min(ys)-2*mg)
-                blobs = img.find_blobs(RED_TARGET, roi=roi, pixels_threshold=20, merge=True, margin=8)
-            else:
-                blobs = img.find_blobs(RED_TARGET, pixels_threshold=30, merge=True, margin=8)
-            if blobs:
-                b = max(blobs, key=lambda x: x.area())
-                if b.density() < 0.35: pass
-                elif a4_ok and not target_in_center(b.cx(), b.cy(), a4_corners, 0.35): pass
-                else:
-                    raw_cx = b.cx(); raw_cy = b.cy()
-                    raw_ok = True
-
-        # ---- 5帧中值 + 2px死区 (准星稳定) ----
-        if raw_ok:
-            lost_cnt = 0
-            med_buf.append((raw_cx, raw_cy))
-            if len(med_buf) > 5: med_buf.pop(0)
-            xs = sorted(p[0] for p in med_buf)
-            ys = sorted(p[1] for p in med_buf)
-            new_cx = xs[len(xs)//2]; new_cy = ys[len(ys)//2]
-
-            # 死区: 变化<2px不更新显示位置, 消除微小抖动
-            if abs(new_cx - disp_cx) >= 2 or abs(new_cy - disp_cy) >= 2:
-                disp_cx = new_cx; disp_cy = new_cy
-
-            target_cx = disp_cx; target_cy = disp_cy
+        # ---- 靶心 = A4几何中心 (蓝色/绿色共用同一计算源) ----
+        if a4_ok and a4_corners:
+            target_cx = sum(c[0] for c in a4_corners) // 4
+            target_cy = sum(c[1] for c in a4_corners) // 4
             target_ok = True
             tx_cm, ty_cm = pixel_to_cm(target_cx, target_cy)
-        else:
-            lost_cnt += 1
-            if lost_cnt > 20:
-                target_ok = False; med_buf = []
-
-        # 画圆检测结果 + 准星
-        if target_ok:
+            # 绿色准星 (与蓝色同源, 绝对稳定)
             img.draw_cross(target_cx, target_cy, color=(0,255,0), size=14, thickness=2)
+        else:
+            target_ok = False
 
         # ---- IDE UI ----
         fps = clock.fps()
         bar_h = 30
         img.draw_rectangle(0, 0, IW, bar_h, color=(0,0,0), thickness=-1, fill=True)
-        if a4_ok and target_ok:
-            img.draw_string_advanced(3, 3, 25, f"A4+RED {fps:.0f}fps", color=(0,255,0))
-        elif a4_ok:
-            img.draw_string_advanced(3, 3, 25, f"A4 OK {fps:.0f}fps", color=(255,255,0))
+        if a4_ok:
+            img.draw_string_advanced(3, 3, 25, f"A4 LOCK {fps:.0f}fps", color=(0,255,0))
         else:
             img.draw_string_advanced(3, 3, 25, f"SEARCH {fps:.0f}fps", color=(255,0,0))
 
@@ -354,16 +302,14 @@ try:
             time.sleep_us(500)  # 等 GC2093 I2C 释放
             oled_cls()
             oled_str(0, 0, "25E Vision")
-            if target_ok:
-                oled_str(0, 12, "T:%+2.1f,%+2.1f" % (tx_cm, ty_cm))
-            else:
-                oled_str(0, 12, "T: ---")
             if a4_ok:
-                oled_str(0, 24, "A4 LOCK")
+                oled_str(0, 12, "X:%+2.1f Y:%+2.1f" % (tx_cm, ty_cm))
+                oled_str(0, 26, "A4 LOCK")
             else:
-                oled_str(0, 24, "A4: search")
-            oled_str(0, 36, "FPS:%.0f" % fps)
-            oled_str(0, 55, "UART:wait")
+                oled_str(0, 12, "Target: ---")
+                oled_str(0, 26, "A4: search")
+            oled_str(0, 42, "FPS:%.0f" % fps)
+            oled_str(0, 55, "UART: wait")
             oled_refresh()
 
         if fc % 300 == 0:
