@@ -108,6 +108,10 @@ STABLE_FRAMES = 3
 a4_corners = None; a4_ok = False; a4_stable = 0; a4_last = None
 target_ok = False; target_cx = 0; target_cy = 0
 tx_cm = 0.0; ty_cm = 0.0
+# 时间平滑 (EMA 低通滤波)
+smooth_cx = 0.0; smooth_cy = 0.0; smooth_ok = False
+ALPHA = 0.25   # 平滑系数: 越小越稳定, 0.1~0.3
+lost_cnt = 0   # 连续丢失帧数
 clock = time.clock(); fc = 0
 
 def pixel_to_cm(px, py):
@@ -282,23 +286,47 @@ try:
         else:
             blobs = img.find_blobs(RED_TARGET, pixels_threshold=40, merge=True)
 
-        target_ok = False
+        # ---- 选最佳 blob ----
+        raw_ok = False; raw_cx = 0; raw_cy = 0
         if blobs:
             for b in sorted(blobs, key=lambda x: x.area(), reverse=True):
                 if b.density() < 0.35: continue
                 bx=b.x()+b.w()//2; by=b.y()+b.h()//2
                 if a4_ok and not target_in_center(bx, by, a4_corners, 0.35): continue
-                target_cx=bx; target_cy=by; target_ok=True
-                tx_cm, ty_cm = pixel_to_cm(bx, by)
-                img.draw_rectangle(b.x(),b.y(),b.w(),b.h(), color=(0,255,0), thickness=1)
-                img.draw_cross(bx, by, color=(0,255,0), size=8, thickness=1)
+                raw_cx=bx; raw_cy=by; raw_ok=True
                 break
+
+        # ---- EMA 时间平滑 (消抖) ----
+        if raw_ok:
+            lost_cnt = 0
+            if not smooth_ok:
+                smooth_cx = float(raw_cx); smooth_cy = float(raw_cy)
+                smooth_ok = True
+            else:
+                # 新位置在平滑位置附近才更新, 防跳变
+                dist = ((raw_cx - smooth_cx)**2 + (raw_cy - smooth_cy)**2) ** 0.5
+                if dist < 30:
+                    smooth_cx = ALPHA * raw_cx + (1 - ALPHA) * smooth_cx
+                    smooth_cy = ALPHA * raw_cy + (1 - ALPHA) * smooth_cy
+            target_cx = int(smooth_cx); target_cy = int(smooth_cy)
+            target_ok = True
+            tx_cm, ty_cm = pixel_to_cm(target_cx, target_cy)
+        else:
+            lost_cnt += 1
+            if lost_cnt > 15:       # 连续丢15帧(~0.25s)才清除
+                smooth_ok = False
+            target_ok = smooth_ok   # 保留上次位置短时间
+
+        # 画平滑后的准星
+        if target_ok:
+            img.draw_cross(target_cx, target_cy, color=(0,255,0), size=10, thickness=2)
+            img.draw_circle(target_cx, target_cy, 5, color=(0,255,0), thickness=1)
 
         # ---- IDE UI ----
         fps = clock.fps()
         bar_h = 30
         img.draw_rectangle(0, 0, IW, bar_h, color=(0,0,0), thickness=-1, fill=True)
-        if a4_ok and target_ok:
+        if a4_ok and smooth_ok:
             img.draw_string_advanced(3, 3, 25, f"A4+RED {fps:.0f}fps", color=(0,255,0))
         elif a4_ok:
             img.draw_string_advanced(3, 3, 25, f"A4 OK {fps:.0f}fps", color=(255,255,0))
