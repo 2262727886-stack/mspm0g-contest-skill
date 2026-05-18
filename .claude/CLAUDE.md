@@ -18,8 +18,8 @@
 
 | 禁用引脚 | 原因 |
 |----------|------|
-| PA0, PA1 | 板载 CH340 固定占用 (UART0 TX/RX) |
 | PA2~PA6 | 时钟引脚，未焊接 |
+| PA10, PA11 | 板载 CH340 固定占用 (UART0 TX/RX) |
 | PA19 | SWDIO 调试数据 |
 | PA20 | SWCLK 调试时钟 |
 
@@ -71,11 +71,13 @@ SDK 版本 `mspm0_sdk_2_10_00_04`，API 必须真实存在。
 |------|-----|
 | MCU | MSPM0G3507 (Cortex-M0+, 80MHz, 128KB/32KB) |
 | 主频 | 32MHz (默认) / 80MHz (需 PLL) |
-| I2C0 | PA28=SDA, PA31=SCL |
-| 电机 PWM | PB0=TIMA0_C2, PB1=TIMA0_C3 |
-| 编码器 | PB2/PB3 (TIMG 正交编码) |
-| 舵机 | PA8=TIMA1_C0, PA9=TIMA1_C1 |
-| 调试串口 | PA0=TX, PA1=RX (115200) |
+| I2C0 OLED | PA28=SDA, PA31=SCL (0x3C) |
+| 电机 PWM | PB15=TIMG8_C0, PB16=TIMG8_C1 |
+| 编码器A | PA15/PA16 (GPIO双边沿中断) |
+| 编码器B | PA17/TIMG7_CH0, PA24/TIMG7_CH1 |
+| 舵机 | PB8=TIMA0_C0, PB9=TIMA0_C1 |
+| CH340调试串口 | PA10=TX, PA11=RX (115200) |
+| K230通信 UART3 | PB2=TX, PB3=RX |
 | SWD | PA19=SWDIO, PA20=SWCLK |
 | 推荐烧录 | XDS110 (SWD) |
 | 看门狗 | 必须在主循环喂狗，禁止在中断中喂 |

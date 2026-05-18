@@ -1,10 +1,25 @@
 /**
- * OLED SSD1306 128x64 I2C 驱动实现
+ * @file oled.c
+ * @brief SSD1306 128x64 I2C OLED driver implementation.
+ *
+ * The driver keeps a full 1 KB framebuffer in RAM and refreshes the SSD1306
+ * page by page. Page refresh avoids horizontal-addressing drift after an I2C
+ * byte loss, which is a common contest-field failure mode for small OLEDs.
  */
 #include "oled.h"
 
-// 6x8 ASCII 字模
-static const unsigned char f6x8[][6] = {
+#define OLED_ADDR          (0x3CU)
+#define OLED_WIDTH         (128U)
+#define OLED_HEIGHT        (64U)
+#define OLED_PAGES         (8U)
+#define OLED_FONT_WIDTH    (6U)
+#define OLED_FONT_HEIGHT   (8U)
+#define OLED_I2C_TIMEOUT   (120000UL)
+#define OLED_INIT_DELAY    (3200000UL)
+#define OLED_DATA_CHUNK    (7U)
+
+// 6x8 ASCII font. Each column is vertical because SSD1306 page memory is vertical.
+static const uint8_t f6x8[][OLED_FONT_WIDTH] = {
 {0x00,0x00,0x00,0x00,0x00,0x00},{0x00,0x00,0x00,0x2f,0x00,0x00},
 {0x00,0x00,0x07,0x00,0x07,0x00},{0x00,0x14,0x7f,0x14,0x7f,0x14},
 {0x00,0x24,0x2a,0x7f,0x2a,0x12},{0x00,0x62,0x64,0x08,0x13,0x23},
@@ -54,72 +69,237 @@ static const unsigned char f6x8[][6] = {
 {0x00,0x00,0x00,0x7F,0x00,0x00},{0x00,0x00,0x41,0x36,0x08,0x00},
 };
 
-static unsigned char oled_gram[128][8];
+// Framebuffer indexed as [page][x] so one SSD1306 page is contiguous in RAM.
+static uint8_t oled_gram[OLED_PAGES][OLED_WIDTH];
 
-void OLED_WR_Byte(unsigned char dat, unsigned char mode) {
-    unsigned char buf[2];
-    buf[0] = mode ? 0x40 : 0x00;
-    buf[1] = dat;
-    DL_I2C_fillControllerTXFIFO(I2C_OLED_INST, buf, 2);
-    while (!(DL_I2C_getControllerStatus(I2C_OLED_INST) & DL_I2C_CONTROLLER_STATUS_IDLE));
-    DL_I2C_startControllerTransfer(I2C_OLED_INST, 0x3C,
-        DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-}
+/**
+ * @brief Wait until I2C0 is idle, with a timeout to avoid field lockups.
+ *
+ * If the OLED is unplugged or SDA/SCL is held low, an infinite wait would make
+ * the whole robot appear dead. Returning false lets higher layers continue.
+ */
+static bool OLED_WaitIdle(void)
+{
+    uint32_t timeout = OLED_I2C_TIMEOUT;
 
-void OLED_Init(void) {
-    OLED_WR_Byte(0xAE,OLED_CMD); OLED_WR_Byte(0x00,OLED_CMD); OLED_WR_Byte(0x10,OLED_CMD); OLED_WR_Byte(0x40,OLED_CMD);
-    OLED_WR_Byte(0x81,OLED_CMD); OLED_WR_Byte(0xCF,OLED_CMD); OLED_WR_Byte(0xA1,OLED_CMD);
-    OLED_WR_Byte(0xC8,OLED_CMD); OLED_WR_Byte(0xA6,OLED_CMD); OLED_WR_Byte(0xA8,OLED_CMD);
-    OLED_WR_Byte(0x3f,OLED_CMD); OLED_WR_Byte(0xD3,OLED_CMD); OLED_WR_Byte(0x00,OLED_CMD);
-    OLED_WR_Byte(0xd5,OLED_CMD); OLED_WR_Byte(0x80,OLED_CMD); OLED_WR_Byte(0xD9,OLED_CMD);
-    OLED_WR_Byte(0xF1,OLED_CMD); OLED_WR_Byte(0xDA,OLED_CMD); OLED_WR_Byte(0x12,OLED_CMD);
-    OLED_WR_Byte(0xDB,OLED_CMD); OLED_WR_Byte(0x30,OLED_CMD); OLED_WR_Byte(0x20,OLED_CMD);
-    OLED_WR_Byte(0x02,OLED_CMD); OLED_WR_Byte(0x8D,OLED_CMD); OLED_WR_Byte(0x14,OLED_CMD);
-    OLED_WR_Byte(0xAF,OLED_CMD);
-}
-
-void OLED_Clear(void) {
-    unsigned char i, n;
-    for (i = 0; i < 8; i++)
-        for (n = 0; n < 128; n++)
-            oled_gram[n][i] = 0;
-}
-
-void OLED_DrawPoint(unsigned char x, unsigned char y, unsigned char t) {
-    if (x > 127 || y > 63) return;
-    if (t) oled_gram[x][y/8] |= (1 << (y & 7));
-    else   oled_gram[x][y/8] &= ~(1 << (y & 7));
-}
-
-void OLED_Refresh(void) {
-    unsigned char i, n;
-    for (i = 0; i < 8; i++) {
-        OLED_WR_Byte(0xB0 + i, OLED_CMD);
-        OLED_WR_Byte(0x00, OLED_CMD);
-        OLED_WR_Byte(0x10, OLED_CMD);
-        for (n = 0; n < 128; n++)
-            OLED_WR_Byte(oled_gram[n][i], OLED_DATA);
+    while ((DL_I2C_getControllerStatus(I2C_OLED_INST) &
+               DL_I2C_CONTROLLER_STATUS_BUSY) != 0U) {
+        if (timeout-- == 0U) {
+            DL_I2C_resetControllerTransfer(I2C_OLED_INST);
+            DL_I2C_flushControllerTXFIFO(I2C_OLED_INST);
+            return false;
+        }
     }
+
+    return true;
 }
 
-void OLED_ShowChar(unsigned char x, unsigned char y, unsigned char chr, unsigned char mode) {
-    if (chr < ' ' || chr > '~') return;
-    unsigned char idx = chr - ' ';
-    for (unsigned char col = 0; col < 6; col++) {
-        unsigned char d = f6x8[idx][col];
-        for (unsigned char row = 0; row < 8; row++) {
-            if (d & 0x01) OLED_DrawPoint(x + col, y + row, mode);
-            else          OLED_DrawPoint(x + col, y + row, !mode);
-            d >>= 1;
+/**
+ * @brief Send one short I2C frame to the SSD1306.
+ *
+ * The first byte is the SSD1306 control byte: 0x00 for command and 0x40 for
+ * display data. The payload is intentionally capped so it fits in the MSPM0G
+ * controller TX FIFO before START is issued.
+ */
+static bool OLED_WriteFrame(uint8_t control, const uint8_t *data, uint8_t len)
+{
+    uint8_t buffer[1U + OLED_DATA_CHUNK];
+    uint32_t status;
+
+    if ((data == NULL) || (len == 0U) || (len > OLED_DATA_CHUNK)) {
+        return false;
+    }
+
+    if (!OLED_WaitIdle()) {
+        return false;
+    }
+
+    DL_I2C_flushControllerTXFIFO(I2C_OLED_INST);
+    buffer[0] = control;
+
+    for (uint8_t i = 0U; i < len; i++) {
+        buffer[i + 1U] = data[i];
+    }
+
+    if (DL_I2C_fillControllerTXFIFO(I2C_OLED_INST, buffer, (uint16_t)(len + 1U)) !=
+        (uint16_t)(len + 1U)) {
+        return false;
+    }
+
+    DL_I2C_startControllerTransfer(I2C_OLED_INST, OLED_ADDR,
+        DL_I2C_CONTROLLER_DIRECTION_TX, (uint16_t)(len + 1U));
+
+    if (!OLED_WaitIdle()) {
+        return false;
+    }
+
+    status = DL_I2C_getControllerStatus(I2C_OLED_INST);
+    if ((status & DL_I2C_CONTROLLER_STATUS_ERROR) != 0U) {
+        DL_I2C_resetControllerTransfer(I2C_OLED_INST);
+        DL_I2C_flushControllerTXFIFO(I2C_OLED_INST);
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @brief Write one command or data byte.
+ *
+ * This public wrapper is kept for compatibility with common OLED examples,
+ * while internally still using the safer timeout path.
+ */
+bool OLED_WR_Byte(uint8_t dat, uint8_t mode)
+{
+    const uint8_t control = (mode == OLED_DATA) ? 0x40U : 0x00U;
+    return OLED_WriteFrame(control, &dat, 1U);
+}
+
+/**
+ * @brief Initialize SSD1306 into 128x64 page-addressing mode.
+ *
+ * The 100 ms power-on delay gives the OLED charge pump and panel bias time to
+ * settle, preventing the first command sequence from being ignored.
+ */
+void OLED_Init(void)
+{
+    static const uint8_t init_cmds[] = {
+        0xAEU, 0x00U, 0x10U, 0x40U, 0x81U, 0xCFU, 0xA1U, 0xC8U,
+        0xA6U, 0xA8U, 0x3FU, 0xD3U, 0x00U, 0xD5U, 0x80U, 0xD9U,
+        0xF1U, 0xDAU, 0x12U, 0xDBU, 0x30U, 0x20U, 0x02U, 0x8DU,
+        0x14U, 0xAFU,
+    };
+
+    delay_cycles(OLED_INIT_DELAY);
+
+    for (uint8_t i = 0U; i < (uint8_t)(sizeof(init_cmds) / sizeof(init_cmds[0])); i++) {
+        (void) OLED_WR_Byte(init_cmds[i], OLED_CMD);
+    }
+
+    OLED_Clear();
+    OLED_Refresh();
+}
+
+/**
+ * @brief Clear the RAM framebuffer.
+ *
+ * Clearing RAM first allows the caller to prepare multiple drawing operations
+ * and send them to the panel in one refresh.
+ */
+void OLED_Clear(void)
+{
+    for (uint8_t page = 0U; page < OLED_PAGES; page++) {
+        for (uint8_t x = 0U; x < OLED_WIDTH; x++) {
+            oled_gram[page][x] = 0U;
         }
     }
 }
 
-void OLED_ShowStr(unsigned char x, unsigned char y, const char *s, unsigned char mode) {
-    while (*s) {
-        OLED_ShowChar(x, y, *s, mode);
-        x += 6;
-        if (x > 122) { x = 0; y += 8; }
+/**
+ * @brief Set or clear one framebuffer pixel.
+ *
+ * SSD1306 memory packs 8 vertical pixels into one page byte, so y selects both
+ * page number and bit position.
+ */
+void OLED_DrawPoint(uint8_t x, uint8_t y, uint8_t t)
+{
+    if ((x >= OLED_WIDTH) || (y >= OLED_HEIGHT)) {
+        return;
+    }
+
+    if (t != 0U) {
+        oled_gram[y / 8U][x] |= (uint8_t)(1U << (y & 7U));
+    } else {
+        oled_gram[y / 8U][x] &= (uint8_t)~(1U << (y & 7U));
+    }
+}
+
+/**
+ * @brief Push the framebuffer to the panel page by page.
+ *
+ * Each page resets its column pointer before data transfer. Data is sent in
+ * seven-byte chunks because the eighth FIFO byte is used by the control byte.
+ */
+void OLED_Refresh(void)
+{
+    for (uint8_t page = 0U; page < OLED_PAGES; page++) {
+        (void) OLED_WR_Byte((uint8_t)(0xB0U + page), OLED_CMD);
+        (void) OLED_WR_Byte(0x00U, OLED_CMD);
+        (void) OLED_WR_Byte(0x10U, OLED_CMD);
+
+        for (uint8_t x = 0U; x < OLED_WIDTH; x += OLED_DATA_CHUNK) {
+            uint8_t chunk = OLED_DATA_CHUNK;
+
+            if ((uint8_t)(OLED_WIDTH - x) < OLED_DATA_CHUNK) {
+                chunk = (uint8_t)(OLED_WIDTH - x);
+            }
+
+            (void) OLED_WriteFrame(0x40U, &oled_gram[page][x], chunk);
+        }
+    }
+}
+
+/**
+ * @brief Draw one 6x8 ASCII character into the framebuffer.
+ *
+ * Unsupported characters are converted to space so debug strings never corrupt
+ * memory when they include a non-printable byte.
+ */
+void OLED_ShowChar(uint8_t x, uint8_t y, char chr, uint8_t mode)
+{
+    uint8_t idx;
+
+    if ((x > (OLED_WIDTH - OLED_FONT_WIDTH)) || (y > (OLED_HEIGHT - OLED_FONT_HEIGHT))) {
+        return;
+    }
+
+    if ((chr < ' ') || (chr > '~')) {
+        chr = ' ';
+    }
+
+    idx = (uint8_t)(chr - ' ');
+    for (uint8_t col = 0U; col < OLED_FONT_WIDTH; col++) {
+        uint8_t d = f6x8[idx][col];
+
+        for (uint8_t row = 0U; row < OLED_FONT_HEIGHT; row++) {
+            OLED_DrawPoint((uint8_t)(x + col), (uint8_t)(y + row),
+                ((d & 0x01U) != 0U) ? mode : (uint8_t)!mode);
+            d >>= 1U;
+        }
+    }
+}
+
+/**
+ * @brief Draw a wrapped ASCII string into the framebuffer.
+ *
+ * Wrapping keeps diagnostics visible on the 128x64 panel instead of silently
+ * writing beyond the right edge.
+ */
+void OLED_ShowStr(uint8_t x, uint8_t y, const char *s, uint8_t mode)
+{
+    uint8_t cursor_x = x;
+    uint8_t cursor_y = y;
+
+    if (s == NULL) {
+        return;
+    }
+
+    while ((*s != '\0') && (cursor_y <= (OLED_HEIGHT - OLED_FONT_HEIGHT))) {
+        if (*s == '\n') {
+            cursor_x = x;
+            cursor_y = (uint8_t)(cursor_y + OLED_FONT_HEIGHT);
+            s++;
+            continue;
+        }
+
+        OLED_ShowChar(cursor_x, cursor_y, *s, mode);
+        cursor_x = (uint8_t)(cursor_x + OLED_FONT_WIDTH);
+
+        if (cursor_x > (OLED_WIDTH - OLED_FONT_WIDTH)) {
+            cursor_x = x;
+            cursor_y = (uint8_t)(cursor_y + OLED_FONT_HEIGHT);
+        }
+
         s++;
     }
 }

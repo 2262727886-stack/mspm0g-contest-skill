@@ -1,6 +1,6 @@
 ---
 name: mspm0g-contest
-description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架构完整参考。当用户需要 MSPM0G 外设驱动代码、引脚映射表、SysConfig 配置、控制算法(PID/卡尔曼/滤波器)、电机/舵机控制、I2C/SPI/UART 通信、ADC 采样、K230 视觉开发、电赛真题方案(25E/24H/23E)、硬件接线、烧录方法、VOFA+ 调试、Flash 参数存储时使用。
+description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架构完整参考。当用户需要 MSPM0G 外设驱动代码、引脚映射表、SysConfig 配置、VS Code c_cpp_properties 依赖库配置、控制算法(PID/卡尔曼/滤波器)、电机/舵机控制、I2C/SPI/UART 通信、ADC 采样、K230 视觉开发、电赛真题方案(25E/24H/23E)、硬件接线、烧录方法、VOFA+ 调试、Flash 参数存储时使用。
 ---
 
 
@@ -31,10 +31,11 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **M0G** | SDK API 验证 (基于 2.10.00.04 例程) | ✅ 已验证 | SDK driverlib/rtos 例程 |
 | **M0G** | TIMG8 TB6612 PWM | 🟡 代码就绪 | 待实机 |
 | **M0G** | TIMA0 舵机 | 🟡 代码就绪 | 待实机 |
-| **M0G** | I2C0 OLED / I2C1 MPU6050 | 🟡 代码就绪 | 待实机 |
+| **M0G** | I2C0 OLED SSD1306 (PA28/PA31) | ✅ 已验证 | 实机点亮,文字显示 |
+| **M0G** | I2C1 MPU6050 | 🟡 代码就绪 | 待实机 |
 | **M0G** | ADC0 8路TCRT5000 | 🟡 代码就绪 | 待实机 |
-| **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 已验证 | 实机烧录成功,LED闪烁 |
-| **M0G** | UART0 CH340 printf | 🟡 代码就绪 | 待实机 |
+| **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 已验证 | 实机烧录成功 |
+| **M0G** | UART0 CH340 (PA10/PA11) | ✅ 已验证 | 实机 115200 串口输出 |
 | **M0G** | PID/滤波/卡尔曼 算法 | ❌ 未实机验证 | 纯算法代码 |
 | **M0G** | Flash 参数存储 | ❌ 未实机验证 | |
 | **M0G** | 真题方案 25E/24H/23E | ❌ 未实机验证 | 框架代码 |
@@ -74,6 +75,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 - **禁止纯纯复用源代码**：不能直接粘贴本文档中的代码模板而不根据实际硬件调整引脚
 
 ### 3. 代码质量
+- **VS Code 依赖配置必做**：每次创建、接手或整理 MSPM0G CCS/Theia 工程后，必须自行创建/更新工作区 `.vscode/c_cpp_properties.json`，这是“代码不报错”的必备依赖库配置。配置必须包含工程根目录、工程 `Debug` 目录、MSPM0 SDK `source`、CMSIS、TI ArmClang include；`defines` 至少包含 `__MSPM0G3507__` 和 `__USE_SYSCONFIG__`；`compilerPath` 必须指向当前机器实际存在的 `tiarmclang.exe`。不要等用户提醒。
 - **所有代码必须带完整注释**：每个函数、每个关键变量、每段算法逻辑必须有中文注释说明 WHY
 - **模块化结构铁律**：按功能拆分为独立 .h/.c 文件，通过 `#include` 内联编译。**严禁全部代码堆在 main.c**。标准结构：
   ```
@@ -492,10 +494,57 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 5. 打开 `.syscfg` 文件，使用图形界面配置外设
 
 ### 关键文件说明
+- `.vscode/c_cpp_properties.json` — VS Code C/C++ 依赖库配置，必须在创建工程后自行生成/更新。缺失或路径错误会导致 `ti_msp_dl_config.h`、DriverLib、CMSIS 头文件误报不存在。
 - `ti_msp_dl_config.h` — SysConfig 自动生成，包含所有外设初始化
 - `ti_msp_dl_config.c` — SysConfig 自动生成的初始化函数 `SYSCFG_DL_init()`
 - `main.c` — 用户代码，在 `SYSCFG_DL_init()` 之后编写
 - SDK 默认安装路径: `C:\ti\mspm0_sdk_2_10_00_04\`
+
+### VS Code c_cpp_properties 必备模板
+
+每次创建 MSPM0G3507 CCS/Theia 工程后，必须按当前机器路径生成 `.vscode/c_cpp_properties.json`。若安装路径不同，只替换路径；不要删除工程 `Debug` 目录，因为 SysConfig 生成的 `ti_msp_dl_config.h` 通常在这里。
+
+```json
+{
+    "configurations": [
+        {
+            "name": "MSPM0G3507_Config",
+            "includePath": [
+                "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang",
+                "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang/Debug",
+                "C:/ti/mspm0_sdk_2_10_00_04/source",
+                "C:/ti/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include",
+                "C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/include"
+            ],
+            "defines": [
+                "__MSPM0G3507__",
+                "__USE_SYSCONFIG__"
+            ],
+            "compilerPath": "C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/bin/tiarmclang.exe",
+            "compilerArgs": [
+                "-mcpu=cortex-m0plus",
+                "-march=thumbv6m",
+                "-mthumb",
+                "-mfloat-abi=soft"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "windows-clang-arm",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang",
+                    "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang/Debug",
+                    "C:/ti/mspm0_sdk_2_10_00_04/source"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}
+```
+
+生成时必须把 `empty_LP_MSPM0G3507_nortos_ticlang` 替换为真实工程目录名。
 
 ### main.c 框架
 ```c
@@ -4445,6 +4494,7 @@ void green_main(void) {
 
 当用户提出需求时，按以下优先级处理：
 
+0. **VS Code 依赖库配置** → 创建/整理工程后必须自行生成 `.vscode/c_cpp_properties.json`，先配置工程根目录、工程 `Debug`、MSPM0 SDK、CMSIS、TI ArmClang include、`__MSPM0G3507__`、`__USE_SYSCONFIG__`，避免把 IntelliSense 误报当成代码错误。
 1. **外设初始化** → 优先引导用户使用 SysConfig 图形配置，同时给出手动 DriverLib 代码作为备选
 2. **算法实现** → 给出可直接编译的 C 代码，注明参数整定方法
 3. **硬件连接** → 给出引脚对照表 + 注意事项
