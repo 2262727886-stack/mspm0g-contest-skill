@@ -372,8 +372,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **TB6612 AIN2** | TB6612FNG | PA12 | GPIO | 左电机方向2 |
 | **TB6612 BIN1** | TB6612FNG | PB0 | GPIO | 右电机方向1 |
 | **TB6612 BIN2** | TB6612FNG | PB1 | GPIO | 右电机方向2 |
-| **电机A 编码器 A相** | MG310 | PA15 | TIMA1_CH0 | ⚠️ TIMA1可能不支持QEI |
-| **电机A 编码器 B相** | MG310 | PA16 | TIMA1_CH1 | 需SysConfig验证 |
+| **电机A 编码器 A相** | MG310 | PA15 | GPIO 双边沿中断 | TIMA1不支持QEI |
+| **电机A 编码器 B相** | MG310 | PA16 | GPIO 双边沿中断 | 软件解码AB相 |
 | **电机B 编码器 A相** | MG310 | PA17 | TIMG7_CH0 | TIMG7编码器模式 |
 | **电机B 编码器 B相** | MG310 | PA24 | TIMG7_CH1 | |
 | **舵机1** | SG90/MG996R | PB9 | TIMA0_CH1 | 50Hz PWM |
@@ -382,8 +382,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **超声波 ECHO** | HC-SR04 | PA9 | GPIO IN | 输入捕获 |
 | **蓝牙 RX** | HC-05/06 | PB6 | USART1_TX | ⚠️ 接收蓝牙数据 |
 | **蓝牙 TX** | HC-05/06 | PB7 | USART1_RX | ⚠️ 发送给蓝牙 |
-| **K230 通信 TX** | ← M0G | PB2 | USART3_TX | ⚠️ 需验证UART3存在 |
-| **K230 通信 RX** | → M0G | PB3 | USART3_RX | 与K230 GPIO11/12对接 |
+| **K230 通信 TX** | ← M0G | PB2 | USART3_TX | ✅ 已验证 |
+| **K230 通信 RX** | → M0G | PB3 | USART3_RX | 接 K230 GPIO11(TXD)/12(RXD) |
 | **TCRT5000 ×8** | 红外循迹 | PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7 | ADC | 8路ADC |
 | **蜂鸣器** | 有源蜂鸣器 | PB17 | GPIO | |
 | **LED** | 红色LED | PB27 | GPIO | |
@@ -398,20 +398,20 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | I2C0 | OLED | 0x3C | ✅ 独占 |
 | I2C1 | MPU6050 | 0x68 | ✅ 独占（与OLED分离） |
 | TIMA0 | 舵机×2 (CH0,CH1) | PB8, PB9 | ✅ |
-| TIMA1 | 电机A编码器 (CH0,CH1) | PA15, PA16 | ⚠️ 需验证 |
+| GPIO中断 | 电机A编码器 (PA15/PA16) | 双边沿中断 | ✅ 软件解码 |
 | TIMG7 | 电机B编码器 (CH0,CH1) | PA17, PA24 | ✅ |
 | TIMG8 | TB6612 PWMA/PWMB | PB15, PB16 | ✅ |
 | UART0 | CH340 调试 | PA0, PA1 | 🔒 |
 | UART1 | 蓝牙 HC-05/06 | PB6, PB7 | ✅ |
-| UART3 | K230 通信 | PB2, PB3 | ⚠️ 需SysConfig验证 |
+| UART3 | K230 通信 | PB2, PB3 | ✅ 已验证 |
 
-**⚠️ 需 SysConfig 验证的问题：**
+**SysConfig 验证结果：**
 
-| # | 问题 | 影响 | 解决方案 |
-|---|------|------|----------|
-| **1** | **TIMA1 编码器模式** | 电机A编码器可能无法用QEI | 若TIMA不支持编码器，改用 GPIO 双边沿中断 PA15/PA16 |
-| **2** | **UART3 是否存在** | K230通信可能无法用USART3 | 若不存在，把蓝牙移到 UART3(GPIO)，K230占用 UART1(PB4=TX/PB5=RX) |
-| **3** | **PB6=USART1_TX 验证** | 蓝牙发送引脚 | 天猛星引脚表显示 PB4=UART1_TX, PB6=UART1_RX。需确认拓展板实际能否将 PB6 复用为 TX |
+| # | 问题 | 结果 | 方案 |
+|---|------|------|------|
+| **1** | TIMA1 编码器模式 | ❌ TIMA1 不支持 QEI | **用 GPIO 双边沿中断**读 PA15/PA16 编码器 |
+| **2** | UART3 是否存在 | ✅ 可用 | PB2=TX, PB3=RX 接 K230 |
+| **3** | PB6=USART1_TX | ✅ 可用 | 蓝牙 USART1 正常工作 |
 
 ---
 
