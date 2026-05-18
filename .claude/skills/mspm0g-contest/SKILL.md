@@ -410,7 +410,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | 引脚 | 原因 |
 |------|------|
 | PA2~PA6 | 时钟引脚, 默认未焊接 |
-| PA0, PA1 | 板载CH340固定占用 |
+| PA10, PA11 | 板载CH340固定占用 (UART0 TX/RX) |
 
 ### 信号冲突检查
 
@@ -470,7 +470,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | GPIO中断 | 电机A编码器 (PA15/PA16) | 双边沿中断 | ✅ 软件解码 |
 | TIMG7 | 电机B编码器 (CH0,CH1) | PA17, PA24 | ✅ |
 | TIMG8 | TB6612 PWMA/PWMB | PB15, PB16 | ✅ |
-| UART0 | CH340 调试 | PA0, PA1 | 🔒 |
+| UART0 | CH340 调试 | PA10, PA11 | 🔒 |
 | UART1 | 蓝牙 HC-05/06 | PB6, PB7 | ✅ |
 | UART3 | K230 通信 | PB2, PB3 | ✅ 已验证 |
 
@@ -960,7 +960,7 @@ int fputc(int ch, FILE *f) {
     return ch;
 }
 
-// SysConfig: UART0(PA0=TX,PA1=RX, 板载CH340) → 115200-8-N-1
+// SysConfig: UART0(PA10=TX,PA11=RX, 板载CH340, ✅已验证) → 115200-8-N-1
 void uart_init(void) {
     // SysConfig 自动生成完整初始化
 }
@@ -974,36 +974,58 @@ void UART0_INST_IRQHandler(void) {
 
 ### --- I2C ---
 
-**0.96" OLED (SSD1306 I2C0) 驱动：**
+**0.96" OLED (SSD1306 I2C0) 驱动 (✅ 实机验证)：**
+
+> 完整模块化代码见 `workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/oled.c` 和 `oled.h`
+
 ```c
-// 25E 拓展板: OLED 在 I2C0 (PA28=SDA, PA31=SCL)
-#define OLED_ADDR 0x3C
+// 25E 拓展板: OLED 在 I2C0 (PA28=SDA, PA31=SCL, 地址0x3C)
+// SysConfig: I2C0 → Controller → 100kHz
+#include "oled.h"   // 模块化: oled.h/oled.c 独立文件
 
-void i2c0_init(void) {
-    // SysConfig: I2C0(PA28=SDA,PA31=SCL) → Controller → 400kHz
+// 核心 I2C 写函数 (带超时+错误恢复, ✅ 实机验证)
+bool OLED_WR_Byte(uint8_t dat, uint8_t mode) {
+    uint8_t buf[2] = {mode ? 0x40 : 0x00, dat};
+    DL_I2C_flushControllerTXFIFO(I2C_OLED_INST);
+    DL_I2C_fillControllerTXFIFO(I2C_OLED_INST, buf, 2);
+    DL_I2C_startControllerTransfer(I2C_OLED_INST, 0x3C,
+        DL_I2C_CONTROLLER_DIRECTION_TX, 2);
+    // 等待完成 + 检查错误
+    uint32_t timeout = 120000;
+    while (DL_I2C_getControllerStatus(I2C_OLED_INST) & DL_I2C_CONTROLLER_STATUS_BUSY) {
+        if (--timeout == 0) {
+            DL_I2C_resetControllerTransfer(I2C_OLED_INST);
+            DL_I2C_flushControllerTXFIFO(I2C_OLED_INST);
+            return false;
+        }
+    }
+    if (DL_I2C_getControllerStatus(I2C_OLED_INST) & DL_I2C_CONTROLLER_STATUS_ERROR)
+        return false;
+    return true;
 }
 
-void oled_write_cmd(uint8_t cmd) {
-    uint8_t buf[2] = {0x00, cmd};
-    DL_I2C_fillControllerTXFIFO(I2C0, buf, 2);
-    DL_I2C_startControllerTransfer(I2C0, OLED_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    while (DL_I2C_getControllerStatus(I2C0) & DL_I2C_CONTROLLER_STATUS_BUSY);
-}
-
-void oled_write_data_buf(uint8_t *data, uint16_t len) {
-    while (len) {
-        uint8_t buf[65];  // 64字节数据 + 1控制字节
-        uint16_t chunk = len > 64 ? 64 : len;
-        buf[0] = 0x40;
-        memcpy(buf + 1, data, chunk);
-        DL_I2C_fillControllerTXFIFO(I2C0, buf, chunk + 1);
-        DL_I2C_startControllerTransfer(I2C0, OLED_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, chunk + 1);
-        while (DL_I2C_getControllerStatus(I2C0) & DL_I2C_CONTROLLER_STATUS_BUSY);
-        data += chunk;
-        len -= chunk;
+// 帧缓冲 + 逐页刷新 (防I2C丢字节平移, K230验证模式)
+static uint8_t gram[8][128];
+void OLED_Refresh(void) {
+    for (uint8_t p = 0; p < 8; p++) {
+        OLED_WR_Byte(0xB0 + p, OLED_CMD);
+        OLED_WR_Byte(0x00, OLED_CMD); OLED_WR_Byte(0x10, OLED_CMD);
+        for (uint16_t x = 0; x < 128; x++)
+            OLED_WR_Byte(gram[p][x], OLED_DATA);
     }
 }
+
+// main.c 中 3 行使用:
+// OLED_Init(); OLED_Clear();
+// OLED_ShowStr(0, 0, "MSPM0G3507", 1); OLED_Refresh();
 ```
+
+**关键坑:**
+1. `DL_I2C_flushControllerTXFIFO` 写前清空TX FIFO防残留数据
+2. `DL_I2C_resetControllerTransfer` 超时时复位I2C状态机, 防止总线锁死
+3. 逐页刷新 (0xB0+page) 每页128字节, 每页重置列指针, 防数据平移
+4. 等待 IDLE 后再发下一字节, 不同时检查 BUSY (SDK例程模式)
+5. 帧缓冲先写好再整屏刷新, 不实时逐像素写
 
 ### --- SPI ---
 
@@ -1313,7 +1335,7 @@ void oled_show_float(uint8_t x, uint8_t y, const char *label, float val) {
 ```c
 // 4×4 矩阵按键 (4 行输出 + 4 列输入)
 // 行: PB8~PB11 (输出), 列: PB12~PB15 (输入, 内部下拉)
-// ⚠️ 避开 PA0/PA1(CH340)和时钟引脚 PA2~PA6
+// ⚠️ 避开 PA10/PA11(CH340)和时钟引脚 PA2~PA6
 #define KEY_ROWS 4
 #define KEY_COLS 4
 
@@ -2204,7 +2226,7 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
 |------|------|------|------|--------|----------|
 | **XDS110** | TI XDS110 + UniFlash/CCS | SWD (PA19/PA20) | 快 | ⭐⭐⭐ 强烈推荐 | .out |
 | **J-Link** | SEGGER J-Link + UniFlash | SWD (PA19/PA20) | 快 | ⭐⭐⭐ | .out |
-| **串口(BSL)** | UniFlash + 板载CH340 | PA0(TX)/PA1(RX) | 慢(920B/s) | ✅ **已验证可用** | .txt (tiarmhex生成) |
+| **串口(BSL)** | UniFlash + BSL ROM | PA0(TX)/PA1(RX) (开漏) | 慢(920B/s) | ✅ **已验证可用** | .txt (tiarmhex生成) |
 
 **✅ BSL 串口烧录实测验证 (2025-05-18)：**
 - UniFlash 9.5.0 + COM5 + MSPM0G3507 烧录成功，程序正常执行
@@ -2361,7 +2383,7 @@ int puts(const char *s) {
 ```
 
 **SysConfig UART 配置要点：**
-- UART0: PA0=TX, PA1=RX, 115200-8-N-1
+- UART0: PA10=TX, PA11=RX, 115200-8-N-1
 - **建议关闭 TX FIFO** (TX FIFO Size = 0)，否则短字符串可能不发送
 - 或发送后调用 `DL_UART_flushTXFIFO(UART0)`
 
@@ -4503,7 +4525,7 @@ void green_main(void) {
 ## 二十一、注意事项
 
 - MSPM0G 是 3.3V 系统，GPIO 不可直接接 5V（部分引脚可耐受 5V，查看数据手册）
-- **天猛星 PA2~PA6 为时钟引脚，默认未焊接，勿用！** PA0/PA1 被 CH340 固定占用
+- **天猛星 PA2~PA6 为时钟引脚，默认未焊接，勿用！** PA10/PA11 被 CH340 固定占用, PA0/PA1 为开漏 BSL 引脚
 - **PA0/PA1 是开漏(Open-Drain)引脚**，用作 UART 时必须加外部 4.7kΩ~10kΩ 上拉电阻到 3.3V，否则 115200 波特率下无法通信（BSL 9600 勉强可用但也不稳定）
 - **SWCLK=PA20, SWDIO=PA19**（非 PA0/PA1）
 - ADC 输入电压范围 0 ~ VREF，超出会损坏
