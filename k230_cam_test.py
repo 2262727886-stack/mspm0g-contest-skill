@@ -278,30 +278,38 @@ try:
             cb = sum(c[1] for c in a4_corners)//4
             img.draw_cross(ca, cb, color=(0,0,255), size=10, thickness=2)
 
-        # ---- 红色靶心: 二值化+开运算 → 同蓝色准星逻辑 ----
+        # ---- 红色靶心: get_statistics 直接算质心 (最稳定) ----
         raw_ok = False; raw_cx = 0; raw_cy = 0
-        if a4_ok and a4_corners:
-            xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=4
-            roi=(min(xs)+mg, min(ys)+mg, max(xs)-min(xs)-2*mg, max(ys)-min(ys)-2*mg)
-            # 1. LAB阈值二值化 (红=白, 背景=黑)
-            bin_red = img.binary(RED_TARGET, roi=roi, invert=False)
-        else:
-            bin_red = img.binary(RED_TARGET, invert=False)
-
-        # 2. 形态学去噪 + 填洞 → 稳定连通域
-        bin_red.open(2)
-        bin_red.close(3)
-
-        # 3. 在干净二值图上找 blob → 边界稳定
-        blobs = bin_red.find_blobs([(127,255)], pixels_threshold=15,
-                                    merge=True, margin=10)
-        if blobs:
-            b = max(blobs, key=lambda x: x.area())
-            if a4_ok and not target_in_center(b.cx(), b.cy(), a4_corners, 0.4):
-                pass
+        try:
+            if a4_ok and a4_corners:
+                xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=6
+                roi=(min(xs)+mg, min(ys)+mg, max(xs)-min(xs)-2*mg, max(ys)-min(ys)-2*mg)
+                stat = img.get_statistics(roi=roi, thresholds=RED_TARGET)
             else:
-                raw_cx = b.cx(); raw_cy = b.cy()
-                raw_ok = True
+                stat = img.get_statistics(thresholds=RED_TARGET)
+
+            if stat.count() > 30:  # 足够多的红色像素
+                # stat.cx/cy = 阈值内像素的几何质心, 极稳
+                if a4_ok and not target_in_center(stat.cx(), stat.cy(), a4_corners, 0.4):
+                    pass
+                else:
+                    raw_cx = stat.cx(); raw_cy = stat.cy()
+                    raw_ok = True
+        except:
+            # 回退: find_blobs
+            if a4_ok and a4_corners:
+                xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=4
+                roi=(min(xs)+mg, min(ys)+mg, max(xs)-min(xs)-2*mg, max(ys)-min(ys)-2*mg)
+                blobs = img.find_blobs(RED_TARGET, roi=roi, pixels_threshold=20, merge=True, margin=8)
+            else:
+                blobs = img.find_blobs(RED_TARGET, pixels_threshold=30, merge=True, margin=8)
+            if blobs:
+                b = max(blobs, key=lambda x: x.area())
+                if b.density() < 0.35: pass
+                elif a4_ok and not target_in_center(b.cx(), b.cy(), a4_corners, 0.35): pass
+                else:
+                    raw_cx = b.cx(); raw_cy = b.cy()
+                    raw_ok = True
 
         # ---- 5帧中值 + 2px死区 (准星稳定) ----
         if raw_ok:
