@@ -2191,6 +2191,65 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
    只要绿色进度条到100%就是烧录成功
 ```
 
+### 软件触发 BSL (基于 bsl_software_invoke_app_demo_uart 例程验证)
+
+无需按硬件 BSL 键，代码中触发进入 BSL 模式：
+
+```c
+/* 方法1: 按键触发 — GPIO中断中置标志, 主循环检测后调用 */
+volatile bool BSL_trigger_flag = false;
+
+void GROUP1_IRQHandler(void) {
+    switch (DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1)) {
+        case GPIO_SWITCHES_INT_IIDX:
+            BSL_trigger_flag = true;  // 按键触发
+            break;
+    }
+}
+
+/* 方法2: UART收到0x22触发 */
+void UART_0_INST_IRQHandler(void) {
+    switch (DL_UART_Main_getPendingInterrupt(UART_0_INST)) {
+        case DL_UART_MAIN_IIDX_RX:
+            if (DL_UART_Main_receiveData(UART_0_INST) == 0x22)
+                BSL_trigger_flag = true;
+            break;
+    }
+}
+
+/* 软件调用BSL (含BSL_ERR_01工作区: 清SRAM后跳转) */
+__STATIC_INLINE void invokeBSL(void) {
+    __asm(
+        "ldr r4, = 0x41C40018\n"   // SRAMFLASH register
+        "ldr r4, [r4]\n"
+        "ldr r1, = 0x03FF0000\n"   // SRAM_SZ mask
+        "ands r4, r1\n"
+        "lsrs r4, r4, #6\n"        // to kB
+        "ldr r1, = 0x20200000\n"   // NON-ECC start
+        "adds r2, r4, r1\n"
+        "movs r3, #0\n"
+        "clear_loop:\n"            // 清SRAM (BSL_ERR_01)
+        "str r3, [r1]\n"
+        "adds r1, r1, #4\n"
+        "cmp r1, r2\n"
+        "blo clear_loop\n"
+        // 强制进入BSL复位
+        "str %[lvl], [%[lvl_addr]]\n"
+        "str %[cmd], [%[cmd_addr]]"
+        : : [lvl_addr]"r"(&SYSCTL->SOCLOCK.RESETLEVEL),
+            [lvl]"r"(DL_SYSCTL_RESET_BOOTLOADER_ENTRY),
+            [cmd_addr]"r"(&SYSCTL->SOCLOCK.RESETCMD),
+            [cmd]"r"(SYSCTL_RESETCMD_KEY_VALUE | SYSCTL_RESETCMD_GO_TRUE)
+        : "r1","r2","r3","r4"
+    );
+}
+
+/* 主循环 */
+if (BSL_trigger_flag) {
+    invokeBSL();  // 跳转BSL, 不复返回
+}
+```
+
 ### CCS 生成 .txt 文件 (串口烧录用)
 
 CCS 默认只生成 `.out`，需在 **Project → Properties → Build → Steps → Post-build steps** 添加：
