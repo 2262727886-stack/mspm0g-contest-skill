@@ -28,6 +28,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **M0G** | UART1 (PB6/PB7) 蓝牙 | ✅ 已验证 | SysConfig 可用 |
 | **M0G** | TIMA1→GPIO中断 编码器A | ✅ 已验证 | SysConfig TIMA1无QEI |
 | **M0G** | TIMG7 编码器B | 🟡 代码就绪 | 待实机 |
+| **M0G** | SDK API 验证 (基于 2.10.00.04 例程) | ✅ 已验证 | SDK driverlib/rtos 例程 |
 | **M0G** | TIMG8 TB6612 PWM | 🟡 代码就绪 | 待实机 |
 | **M0G** | TIMA0 舵机 | 🟡 代码就绪 | 待实机 |
 | **M0G** | I2C0 OLED / I2C1 MPU6050 | 🟡 代码就绪 | 待实机 |
@@ -645,63 +646,129 @@ int main(void) {
 
 ## 六、外设初始化代码模板
 
-所有代码基于 **TI MSPM0 SDK (DriverLib)**，头文件 `ti_msp_dl_config.h` 由 SysConfig 生成。
+### ⚠️ SDK 架构铁律 (基于 SDK 2.10.00.04 例程验证)
+
+```
+SysConfig (.syscfg)           →  生成 ti_msp_dl_config.c/h  →  代码调用运行时 API
+(配置引脚/时钟/外设/中断)         (SYSCFG_DL_init() 完成所有初始化)   (启动/读写/改占空比)
+```
+
+**所有外设的引脚分配、模式选择、时钟分频、中断使能全在 SysConfig GUI 完成。代码里不写任何 `xxx_init()` 函数。**
+
+| 错误做法 (禁止) | 正确做法 |
+|-----------------|---------|
+| `DL_GPIO_setDirection()` 代码配引脚 | SysConfig GPIO Pin → Direction |
+| `DL_TimerG_setPeriod()` 代码设周期 | SysConfig Timer → Period |
+| `DL_GPIO_setInternalResistor()` 代码设上下拉 | SysConfig GPIO Pin → Pull |
+| 手写 IRQHandler 注册 | SysConfig 勾选 Interrupt → 自动生成 |
+
+**运行时 API (SysConfig 初始化后可用)：**
+
+| 功能 | 正确 API | 来源 |
+|------|---------|------|
+| GPIO 输出 | `DL_GPIO_setPins/clearPins/togglePins(PORT, PIN)` | SDK 例程 |
+| GPIO 读取 | `DL_GPIO_readPins(PORT, PIN)` | SDK 例程 |
+| 启动 PWM | `DL_TimerG_startCounter(TIMGx)` | SDK 例程 |
+| 改占空比 | `DL_TimerG_setCaptureCompareValue(TIMGx, CH, val)` | dl_timerg.h |
+| 读编码器 | `DL_TimerG_getTimerCount(TIMGx)` | dl_timerg.h |
+| 读捕获值 | `DL_TimerG_getCaptureCompareValue(TIMGx, CH)` | SDK 例程 |
+| UART 发送 | `DL_UART_transmitDataBlocking(UARTx, byte)` | SDK 例程 |
+| UART 接收 | `DL_UART_receiveData(UARTx)` | SDK 例程 |
+| I2C 写 | `DL_I2C_fillControllerTXFIFO + startControllerTransfer` | SDK 例程 |
+| ADC 读取 | `DL_ADC12_startConversion + DL_ADC12_getMemResult` | SDK 例程 |
+
+### main.c 标准框架
+
+```c
+#include "ti_msp_dl_config.h"
+
+int main(void) {
+    SYSCFG_DL_init();           // SysConfig 生成的全部外设初始化
+    __enable_irq();             // 全局中断使能
+
+    // 启动需要显式启动的外设
+    DL_TimerG_startCounter(TIMG8);  // PWM
+    DL_TimerG_startCounter(TIMG7);  // 编码器
+
+    while (1) {
+        // 业务逻辑: 读传感器 → PID → 控电机 → 喂狗
+        DL_WDT_feed(WDT);
+    }
+}
+```
+
+---
 
 ### --- GPIO ---
 
-**数字输出 (LED/蜂鸣器)：**
-```c
-// 25E 拓展板: LED=PB27, 蜂鸣器=PB17
-#include "ti_msp_dl_config.h"
+> **SDK铁律: GPIO 方向/上下拉/中断 全在 SysConfig 配置, 代码只做运行时操作**
 
-void gpio_output_init(void) {
-    DL_GPIO_setDirection(GPIOB, DL_GPIO_PIN_27, DL_GPIO_OUTPUT);
-    DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27);  // 初始低电平
-}
-
-#define LED_ON()   DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_27)
-#define LED_OFF()  DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27)
-#define LED_TOGGLE() DL_GPIO_togglePins(GPIOB, DL_GPIO_PIN_27)
+**SysConfig 配置 GPIO 输出 (LED/蜂鸣器)：**
+```
+ADD → GPIO Pin → Pin: PB27 → Direction: Output → Initial: Low → 保存
 ```
 
-**数字输入 (按键)：**
-```c
-void gpio_input_init(void) {
-    // 25E 拓展板: K1=PA26, K2=PA25, 内部上拉
-    DL_GPIO_setDirection(GPIOA, DL_GPIO_PIN_26, DL_GPIO_INPUT);
-    DL_GPIO_setDigitalInternalResistor(PINCM26, DL_GPIO_RESISTOR_PULL_UP);
-}
-
-uint32_t key_state = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26);
+**SysConfig 配置 GPIO 输入 (按键带中断)：**
+```
+ADD → GPIO Pin → Pin: PA26 → Direction: Input → Pull: Pull-up
+                → Interrupt: Falling edge → 保存
 ```
 
-**GPIO 中断 (按键触发)：**
+**运行时代码 (极简)：**
 ```c
+// 25E 拓展板: LED=PB27, 蜂鸣器=PB17, K1=PA26, K2=PA25
+// 以下宏用 SysConfig 生成的 IOMUX 名: CONFIG_GPIO_LED/CONFIG_GPIO_BUZZER 等
+#define LED_ON()   DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27)
+#define LED_OFF()  DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_27)
+#define BEEP_ON()  DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_17)
+#define BEEP_OFF() DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_17)
+
+// 按键读取
+if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26) == 0) { /* K1按下 */ }
+
+// GPIO 中断 (SysConfig 自动生成 GROUP1_IRQHandler 框架)
 void GROUP1_IRQHandler(void) {
-    uint32_t status = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_26);
-    if (status & DL_GPIO_PIN_26) {
+    if (DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_26)) {
         DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_26);
-        // 处理按键事件 — 置标志位
+        // 处理按键
     }
 }
 ```
 
 ### --- Timer (TIMG) ---
 
-**PWM 输出 (TB6612 电机调速)：**
-```c
-// 25E 拓展板: PWMA=PB15(TIMG8_C0), PWMB=PB16(TIMG8_C1)
-// 时钟 80MHz, 目标 PWM 频率 20kHz → Period = 4000
-// SysConfig: TIMG8 → PWM 模式 → PB15=CH0, PB16=CH1 → period=4000
-void pwm_init(void) {
-    DL_TimerG_setPeriod(TIMG8, 4000);          // 20kHz PWM
-    DL_TimerG_setCaptureCompareValue(TIMG8, 0, 2000); // CH0 50%
-    DL_TimerG_setCaptureCompareValue(TIMG8, 1, 2000); // CH1 50%
-    DL_TimerG_startCounter(TIMG8);
-}
+> **SDK铁律: 定时器周期/模式/引脚全在 SysConfig 配置, `DL_TimerG_setPeriod()` 不存在!**
 
-void pwm_set_duty(uint32_t ch, uint32_t duty) { // ch=0/1, duty: 0~4000
-    DL_TimerG_setCaptureCompareValue(TIMG8, ch, duty);
+**SysConfig 配置 PWM (TB6612)：**
+```
+ADD → Timer G → Name: TIMG_8 → Mode: PWM
+  → PWM Pin0: PB15 (TIMG8_C0) → PWM Pin1: PB16 (TIMG8_C1)
+  → Period: 4000 (32MHz/4000=8kHz 或 PLL 80MHz/4000=20kHz)
+  → 保存
+```
+
+**SysConfig 配置编码器 (TIMG7 QEI)：**
+```
+ADD → Timer G → Name: TIMG_7 → Mode: Encoder/QEI
+  → Phase A: PA17 → Phase B: PA24 → 保存
+```
+
+**运行时代码：**
+```c
+// PWM 启动和占空比调整
+DL_TimerG_startCounter(TIMG8);  // 启动 PWM
+DL_TimerG_setCaptureCompareValue(TIMG8, 0, duty_a);  // CH0=PB15
+DL_TimerG_setCaptureCompareValue(TIMG8, 1, duty_b);  // CH1=PB16
+
+// 编码器读取 (TIMG7)
+int32_t enc = (int32_t)DL_TimerG_getTimerCount(TIMG7);
+
+// 输入捕获 (TIMG12 HC-SR04)
+void TIMG12_IRQHandler(void) {
+    if (DL_TimerG_getPendingInterrupt(TIMG12) & DL_TIMERG_IIDX_CAPTURE_C0) {
+        uint32_t cap = DL_TimerG_getCaptureCompareValue(TIMG12, 0);
+        // ...
+    }
 }
 ```
 
@@ -1175,7 +1242,9 @@ void oled_show_float(uint8_t x, uint8_t y, const char *label, float val) {
 
 **中文显示方法:** 将汉字取模（16×16 点阵，纵向列行式），每个汉字 32 字节。通过 `oled_draw_pixel` 逐点写入 framebuffer。建议用 PCtoLCD2002 等工具生成字模，然后构建 `const uint8_t hanzi_table[][32]` 数组查表显示。
 
-### --- 矩阵按键扫描 ---
+### --- 矩阵按键扫描 (拓展板未使用, 仅供参考) ---
+
+> ⚠️ 矩阵按键不在25E拓展板上。以下为旧版参考代码, 正确做法: SysConfig GPIO Pin 配方向+上下拉, 代码只做读写。
 
 ```c
 // 4×4 矩阵按键 (4 行输出 + 4 列输入)
@@ -1220,7 +1289,9 @@ char matrix_key_scan(void) {
 }
 ```
 
-### --- EC11 旋转编码器 ---
+### --- EC11 旋转编码器 (拓展板未使用, 仅供参考) ---
+
+> ⚠️ 拓展板上EC11引脚(PA16/PA17)已被编码器A占用。以下为旧版参考, 正确做法: SysConfig 配GPIO双边沿中断。
 
 ```c
 // A相 PA16, B相 PA17, 按键 PB4 (均有中断, 避开PB2/PB3编码器)
