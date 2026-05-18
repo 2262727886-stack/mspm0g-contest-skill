@@ -59,7 +59,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 | 禁用引脚 | 原因 | 备注 |
 |----------|------|------|
-| **PA0, PA1** | 板载 CH340 固定占用 (UART0 TX/RX) | 不可改，不可复用 |
+| **PA10, PA11** | 板载 CH340 固定占用 (UART0 TX/RX) | 不可改，不可复用 |
 | **PA2~PA6** | 时钟引脚 (ROSC/LFXIN/HFXIN) | 默认未焊接，**绝对勿用** |
 | **PA19** | SWDIO 调试数据 | 保留调试接口 |
 | **PA20** | SWCLK 调试时钟 | 保留调试接口 |
@@ -179,8 +179,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 | 引脚 | 功能1 | 功能2 | 功能3 | 功能4 | 功能5 | 功能6 | Skill分配 |
 |------|-------|-------|-------|-------|-------|-------|-----------|
-| **PA0** | TIMG8_C1 | TIMA0_C0 | **UART0_TX** | I2C0_SDA | — | — | 🔒 CH340 TX |
-| **PA1** | TIMG8_C0 | TIMA0_C1 | **UART0_RX** | I2C0_SCL | — | — | 🔒 CH340 RX |
+| **PA0** | TIMG8_C1 | TIMA0_C0 | **UART0_TX** | I2C0_SDA | — | — | ⚠️ 开漏, BSL |
+| **PA1** | TIMG8_C0 | TIMA0_C1 | **UART0_RX** | I2C0_SCL | — | — | ⚠️ 开漏, BSL |
 | **PA2** | ROSC | TIMG8_C1 | TIMG7_C1 | SPI0_CS0 | SPI1_CS0 | — | 🚫 时钟ROSC |
 | **PA7** | TIMA0_C1 | TIMG7_C1 | TIMA0_C2 | TIMG8_C0 | — | — | ✅ TB6612 AIN1 |
 | **PA8** | TIMA0_C0 | SPI0_CS0 | UART1_TX | **TIMA1_C0** | — | — | ✅ 舵机1 Pan |
@@ -256,7 +256,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 // === 25E 竞赛拓展板引脚分配 (SysConfig 已验证) ===
 
 // 调试串口 (CH340, 固定不可改)
-// PA0 = UART0_TX, PA1 = UART0_RX
+// PA10 = UART0_TX, PA11 = UART0_RX (CH340)
 
 // OLED — I2C0
 // PA28 = SDA (I2C0_SDA), PA31 = SCL (I2C0_SCL)
@@ -368,7 +368,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **蓝牙 TX** | HC-05/06 | PB7 (USART1_RX) | |
 | **K230 通信 TX** | → K230 | PB2 (USART3_TX) | 视觉数据 |
 | **K230 通信 RX** | ← K230 | PB3 (USART3_RX) | |
-| **CH340 串口** | 调试/USB | PA0(TX), PA1(RX) | 🔒 板载固定 |
+| **CH340 串口** | 调试/USB | PA10(TX), PA11(RX) | 🔒 板载固定 |
 | **SWD 调试** | XDS110 | PA19(SWDIO), PA20(SWCLK) | 🔒 调试接口 |
 
 ### K230 端硬件引脚总表
@@ -448,7 +448,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **LED** | 红色LED | PB27 | GPIO | |
 | **按键 K1** | 轻触按键 | PA26 | GPIO IN | 上拉,按下=低 |
 | **按键 K2** | 轻触按键 | PA25 | GPIO IN | |
-| **CH340 串口** | 调试/USB | PA0(TX), PA1(RX) | UART0 | 🔒 板载固定 |
+| **CH340 串口** | 调试/USB | PA10(TX), PA11(RX) | UART0 | 🔒 板载固定 |
 
 **信号冲突检查 (拓展板)：**
 
