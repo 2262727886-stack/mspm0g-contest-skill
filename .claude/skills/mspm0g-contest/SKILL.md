@@ -1771,11 +1771,22 @@ static void uart_poll_params(void) {
 | `B800` | base PWM = 800 (前馈) | |
 | 回车 | **自动重置 PID，回显确认** | |
 
-**CSV 输出格式 (拷贝到 Excel/串口绘图工具)：**
+**CSV 输出格式 (兼容 VOFA+ / Excel / 串口绘图)：**
 ```
 count,pwm,target,Kp_x10,Ki_x100,Kd_x100,base_pwm
 62,590,42,5,8,0,800
 ```
+
+> ⚠️ **VOFA+ 串口命令防丢**: CSV 输出频率降到每 4 个 PID 周期 (80ms)。`csv_skip` 计数器跳过不发 CSV 的周期，UART RX 空闲接收命令不丢包。
+
+**VOFA+ 连接设置：**
+| 参数 | 值 |
+|------|-----|
+| 端口 | COM5 |
+| 波特率 | 115200 |
+| 协议 | CSV |
+| 分隔符 | `,` |
+| 通道 | CH1=速度 CH2=PWM CH3=目标 |
 
 **调参工作流：**
 1. 先发 `B999 T999` 满功率跑 → 记下最大 count = 上限

@@ -29,6 +29,7 @@ static int g_base_pwm = 800;
 static volatile uint8_t g_pid_tick = 0;
 
 void SysTick_Handler(void)
+
 {
     g_pid_tick = 1;
 }
@@ -196,20 +197,18 @@ int main(void)
             last_pwm = pwm;
             Motor_B((int16_t)pwm);
 
-            uart_print_num(count);
-            uart_putc(',');
-            uart_print_num(pwm);
-            uart_putc(',');
-            uart_print_num(g_target);
-            uart_putc(',');
-            uart_print_num(g_kp_x10);
-            uart_putc(',');
-            uart_print_num(g_ki_x100);
-            uart_putc(',');
-            uart_print_num(g_kd_x100);
-            uart_putc(',');
-            uart_print_num(g_base_pwm);
-            uart_putc('\n');
+            static uint8_t csv_skip = 0;
+            if (++csv_skip >= 4) {  // 每4个PID周期(=80ms)发一次CSV
+                csv_skip = 0;
+                uart_print_num(count);   uart_putc(',');
+                uart_print_num(pwm);     uart_putc(',');
+                uart_print_num(g_target); uart_putc(',');
+                uart_print_num(g_kp_x10); uart_putc(',');
+                uart_print_num(g_ki_x100); uart_putc(',');
+                uart_print_num(g_kd_x100); uart_putc(',');
+                uart_print_num(g_base_pwm);
+                uart_putc('\n');
+            }
         }
     }
 }
