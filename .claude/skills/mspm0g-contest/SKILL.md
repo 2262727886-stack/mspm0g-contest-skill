@@ -91,6 +91,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
   - `DL_TimerG_getCounterValue()` — 不存在, 正确: `DL_TimerG_getTimerCount()` (= `DL_Timer_getTimerCount`)
   - `DL_SPI_transferBlocking()` — 不存在, 正确: `DL_SPI_transmitDataBlocking8/16/32()` + `DL_SPI_receiveDataBlocking8/16/32()`
   - `DL_WDT_feed/enable/setPeriod/getCount(WDT)` — 全部不存在, 外设名为 WWDT, 喂狗= `DL_WWDT_restart(WWDT0_INST)`, 配置全在 SysConfig
+  - `DL_FlashCTL_eraseSector(sector)` — 不存在, 正确: `DL_FlashCTL_eraseMemoryFromRAM(FLASHCTL, addr, size)`
+  - `DL_FlashCTL_programMemory(addr, data, len)` — 不存在, 正确: `DL_FlashCTL_programMemoryFromRAM32/64WithECCGenerated(FLASHCTL, addr, &data)`
 - **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---
@@ -1943,80 +1945,69 @@ MSPM0G3507 Flash: 128KB
 └─────────────────────────────┘ 0x0002_0000
 ```
 
-### 参数结构体 + 读写代码
+### 参数结构体 + 读写代码 (基于 flashctl_multiple_size_write 例程)
 
 ```c
 #include "ti_msp_dl_config.h"
 
-/* 参数存储的 Flash 起始地址 (最后一个扇区, 避开程序区) */
+/* Flash基地址 (避开程序区) */
 #define PARAM_FLASH_ADDR   0x0001F000
-#define PARAM_FLASH_SIZE   2048  /* 实际使用 2KB */
 
-/* 参数结构体 (对齐到 4 字节) */
-typedef struct __attribute__((aligned(4))) {
-    uint32_t magic;           /* 魔数: 0xAA55_EE11 表示数据有效 */
-    uint32_t version;         /* 版本号, 结构体改了就 +1 */
-    /* ---- TCRT5000 校准 ---- */
-    uint16_t tcrt_min[5];     /* 白底最小值 */
-    uint16_t tcrt_max[5];     /* 黑线最大值 */
-    /* ---- PID 参数 ---- */
-    float    pid_kp;
-    float    pid_ki;
-    float    pid_kd;
+typedef struct __attribute__((aligned(8))) {  /* Flash要求8字节对齐 */
+    uint32_t magic;
+    uint32_t version;
+    uint16_t tcrt_min[8];    /* 8路循迹校准 */
+    uint16_t tcrt_max[8];
+    float    pid_kp, pid_ki, pid_kd;
     float    base_speed;
-    /* ---- 编码器偏移 ---- */
     int32_t  encoder_offset;
-    /* ---- 校验 ---- */
-    uint32_t crc32;           /* 整个结构体的 CRC32 */
+    uint32_t crc32;
 } PersistentParams;
 
 static PersistentParams g_params;
 
-/* ---- Flash 扇区擦除 ---- */
-void flash_erase_params(void) {
-    DL_FlashCTL_unprotectSector(
-        DL_FLASHCTL_MAIN_SECTOR_31,  /* 最后一个扇区 */
-        DL_FLASHCTL_READ_WRITE_PERMISSION);
-    DL_FlashCTL_eraseSector(DL_FLASHCTL_MAIN_SECTOR_31);
+/* 擦除扇区 */
+DL_FLASHCTL_COMMAND_STATUS flash_erase(uint32_t addr) {
+    DL_FlashCTL_unprotectSector(FLASHCTL, addr, DL_FLASHCTL_REGION_SELECT_MAIN);
+    return DL_FlashCTL_eraseMemoryFromRAM(
+        FLASHCTL, addr, DL_FLASHCTL_COMMAND_SIZE_SECTOR);
 }
 
-/* ---- 写入参数到 Flash ---- */
-void flash_save_params(void) {
-    /* 计算 CRC32 (简化校验和) */
+/* 写入32位字 (每次写入前需解锁) */
+DL_FLASHCTL_COMMAND_STATUS flash_write32(uint32_t addr, uint32_t *data) {
+    DL_FlashCTL_unprotectSector(FLASHCTL, addr, DL_FLASHCTL_REGION_SELECT_MAIN);
+    return DL_FlashCTL_programMemoryFromRAM32WithECCGenerated(
+        FLASHCTL, addr, data);
+}
+
+/* 保存参数 (擦除→逐字写入) */
+bool flash_save_params(void) {
     uint32_t checksum = 0;
     uint32_t *p = (uint32_t *)&g_params;
-    for (int i = 0; i < sizeof(g_params) / 4 - 1; i++) {
-        checksum ^= p[i];
-    }
+    for (int i = 0; i < sizeof(g_params)/4 - 1; i++) checksum ^= p[i];
     g_params.crc32 = checksum;
 
-    flash_erase_params();
-
-    /* ⚠️ 按 4 字节对齐写入 (MSPM0 Flash 编程要求) */
-    DL_FlashCTL_programMemory(PARAM_FLASH_ADDR,
-                              (uint32_t *)&g_params,
-                              sizeof(g_params));
+    if (flash_erase(PARAM_FLASH_ADDR) != DL_FLASHCTL_COMMAND_STATUS_FAILED) {
+        for (int i = 0; i < sizeof(g_params)/4; i++) {
+            if (flash_write32(PARAM_FLASH_ADDR + i*4, &p[i])
+                == DL_FLASHCTL_COMMAND_STATUS_FAILED)
+                return false;
+        }
+        return true;
+    }
+    return false;
 }
 
-/* ---- 从 Flash 读取参数 ---- */
+/* 从 Flash 读取 */
 bool flash_load_params(void) {
     PersistentParams *stored = (PersistentParams *)PARAM_FLASH_ADDR;
-
-    /* 检查魔数 */
-    if (stored->magic != 0xAA55EE11) {
-        printf("Flash 参数未初始化, 使用默认值\r\n");
-        return false;
-    }
-
-    /* 检查 CRC */
-    uint32_t checksum = 0;
+    if (stored->magic != 0xAA55EE11) return false;
+    uint32_t cs = 0;
     uint32_t *p = (uint32_t *)stored;
-    for (int i = 0; i < sizeof(PersistentParams) / 4 - 1; i++) {
-        checksum ^= p[i];
-    }
-    if (checksum != stored->crc32) {
-        printf("Flash 参数 CRC 错误, 使用默认值\r\n");
-        return false;
+    for (int i = 0; i < sizeof(g_params)/4 - 1; i++) cs ^= p[i];
+    if (cs != stored->crc32) return false;
+    memcpy(&g_params, stored, sizeof(PersistentParams));
+    return true;
     }
 
     /* 加载 */
@@ -2059,23 +2050,24 @@ int main(void)
 }
 ```
 
-### 关键 API
+### 关键 API (基于 flashctl_multiple_size_write 例程)
 
 | 函数 | 作用 |
 |------|------|
-| `DL_FlashCTL_unprotectSector(sector, perm)` | 解锁扇区写保护 |
-| `DL_FlashCTL_eraseSector(sector)` | 擦除扇区 (写前必须擦) |
-| `DL_FlashCTL_programMemory(addr, data, len)` | 写入 Flash (4 字节对齐) |
+| `DL_FlashCTL_unprotectSector(FLASHCTL, addr, region)` | 解锁扇区 (每次写/擦前调用) |
+| `DL_FlashCTL_eraseMemoryFromRAM(FLASHCTL, addr, size)` | 擦除扇区 |
+| `DL_FlashCTL_programMemoryFromRAM32WithECCGenerated(FLASHCTL, addr, &data)` | 写入32位 |
+| `DL_FlashCTL_programMemoryFromRAM64WithECCGenerated(FLASHCTL, addr, &data)` | 写入64位 |
 
 ### 注意事项
 
 | 问题 | 解决 |
 |------|------|
-| **Flash 写前必须擦除** | 整个扇区一次擦除 (~20ms), 所以先读到 RAM 改完再回写 |
-| **4 字节对齐** | 写入地址和数据长度必须是 4 的倍数 |
-| **擦写寿命** | ~10 万次, 不要每帧都写 (只在"保存"按钮按下时写) |
-| **写期间不能中断** | Flash 写操作时 CPU 暂停, 不要在 PWM 中断里写 |
-| **扇区选择** | 用最后一个扇区, 确保不覆盖程序代码 |
+| **地址对齐** | 8字节对齐 (word address), 非4字节 |
+| **每次写前解锁** | 每项操作前都要调 `unprotectSector` |
+| **返回值检查** | 所有操作返回 `DL_FLASHCTL_COMMAND_STATUS`, 检查 FAILED |
+| **ECC 自动生成** | `WithECCGenerated` 版函数硬件自动算 ECC |
+| **扇区选择** | 用地址指定扇区 (如 `0x0001F000`), 非扇区编号 |
 ## 十二、中文取模教程
 
 ### 工具
