@@ -84,7 +84,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
   - `DL_GPIO_setInternalResistor()` — 不存在 (dl_gpio.h), 正确: `DL_GPIO_setDigitalInternalResistor(PINCMxx, ...)`
   - `DL_ADC12_readMemResult()` — 不存在, 正确: `DL_ADC12_getMemResult()`
   - `DL_I2C_transmitBlocking()` / `DL_I2C_receiveBlocking()` — 不存在, 正确: `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()`
-  - `DL_I2C_isBusy()` — 不存在, 正确: `DL_I2C_getControllerStatus(I2Cx, DL_I2C_CONTROLLER_STATUS_BUSY)`
+  - `DL_I2C_isBusy()` — 不存在, 正确: `DL_I2C_getControllerStatus(I2Cx) & DL_I2C_CONTROLLER_STATUS_BUSY`
   - `DL_I2C_sendControllerStop()` — 不存在, STOP 由 `DL_I2C_startControllerTransfer()` 自动生成
   - `DL_I2C_startControllerTransfer(i2c, dir, len)` 缺地址参数 — 正确: `DL_I2C_startControllerTransfer(i2c, addr, dir, len)` (4参数)
   - `DL_TimerG_setPeriod()` — 不存在, 周期在 SysConfig 中设置
@@ -925,7 +925,7 @@ void oled_write_cmd(uint8_t cmd) {
     uint8_t buf[2] = {0x00, cmd};
     DL_I2C_fillControllerTXFIFO(I2C0, buf, 2);
     DL_I2C_startControllerTransfer(I2C0, OLED_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    while (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY));
+    while (DL_I2C_getControllerStatus(I2C0) & DL_I2C_CONTROLLER_STATUS_BUSY);
 }
 
 void oled_write_data_buf(uint8_t *data, uint16_t len) {
@@ -936,7 +936,7 @@ void oled_write_data_buf(uint8_t *data, uint16_t len) {
         memcpy(buf + 1, data, chunk);
         DL_I2C_fillControllerTXFIFO(I2C0, buf, chunk + 1);
         DL_I2C_startControllerTransfer(I2C0, OLED_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, chunk + 1);
-        while (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY));
+        while (DL_I2C_getControllerStatus(I2C0) & DL_I2C_CONTROLLER_STATUS_BUSY);
         data += chunk;
         len -= chunk;
     }
@@ -1022,16 +1022,16 @@ void mpu6050_write_reg(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = {reg, val};
     DL_I2C_fillControllerTXFIFO(I2C1, buf, 2);
     DL_I2C_startControllerTransfer(I2C1, MPU6050_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    while (DL_I2C_getControllerStatus(I2C1, DL_I2C_CONTROLLER_STATUS_BUSY));
+    while (DL_I2C_getControllerStatus(I2C1) & DL_I2C_CONTROLLER_STATUS_BUSY);
 }
 
 uint8_t mpu6050_read_reg(uint8_t reg) {
     uint8_t val = 0;
     DL_I2C_fillControllerTXFIFO(I2C1, &reg, 1);
     DL_I2C_startControllerTransfer(I2C1, MPU6050_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-    while (DL_I2C_getControllerStatus(I2C1, DL_I2C_CONTROLLER_STATUS_BUSY));
+    while (DL_I2C_getControllerStatus(I2C1) & DL_I2C_CONTROLLER_STATUS_BUSY);
     DL_I2C_startControllerTransfer(I2C1, MPU6050_ADDR, DL_I2C_CONTROLLER_DIRECTION_RX, 1);
-    while (DL_I2C_getControllerStatus(I2C1, DL_I2C_CONTROLLER_STATUS_BUSY));
+    while (DL_I2C_getControllerStatus(I2C1) & DL_I2C_CONTROLLER_STATUS_BUSY);
     val = DL_I2C_receiveControllerData(I2C1);
     return val;
 }
@@ -1487,14 +1487,14 @@ void main_loop(void) {
 
 ```c
 /* 发送前检查总线是否忙 */
-if (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY)) {
+if (DL_I2C_getControllerStatus(I2C0) & DL_I2C_CONTROLLER_STATUS_BUSY) {
     return;  // 上次传输未完成, 跳过
 }
 
 /* 超时保护: startControllerTransfer 自动生成 STOP, 无需手动 */
 #define I2C_TIMEOUT_MS  10
 uint32_t t0 = g_ms_ticks;
-while (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY)) {
+while (DL_I2C_getControllerStatus(I2C0) & DL_I2C_CONTROLLER_STATUS_BUSY) {
     if (g_ms_ticks - t0 > I2C_TIMEOUT_MS) {
         DL_I2C_disableStopCondition(I2C0);  // 异常时强制释放总线
         break;
@@ -2391,8 +2391,8 @@ void i2c_scan(DL_I2C_TypeDef *i2c) {
     for (uint8_t addr = 0x08; addr < 0x78; addr++) {
         DL_I2C_fillControllerTXFIFO(i2c, &addr, 1);
         DL_I2C_startControllerTransfer(i2c, addr, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-        while (DL_I2C_getControllerStatus(i2c, DL_I2C_CONTROLLER_STATUS_BUSY));
-        if (DL_I2C_getControllerStatus(i2c, DL_I2C_CONTROLLER_STATUS_ADDR_ACK)) {
+        while (DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_BUSY);
+        if (DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_ADDR_ACK) {
             printf("0x%02X ", addr);  // 设备存在
         }
         // STOP 由 startControllerTransfer 自动生成
