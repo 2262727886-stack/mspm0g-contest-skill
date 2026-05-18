@@ -278,25 +278,27 @@ try:
             cb = sum(c[1] for c in a4_corners)//4
             img.draw_cross(ca, cb, color=(0,0,255), size=10, thickness=2)
 
-        # ---- 红色靶心: find_circles (霍夫圆, 圆心精度远优于blob) ----
-        raw_ok = False; raw_cx = 0; raw_cy = 0; raw_r = 0
+        # ---- 红色靶心: find_blobs (高速, 用矩质心) ----
+        raw_ok = False; raw_cx = 0; raw_cy = 0
         if a4_ok and a4_corners:
-            xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=8
+            xs=[c[0] for c in a4_corners]; ys=[c[1] for c in a4_corners]; mg=4
             roi=(min(xs)+mg, min(ys)+mg, max(xs)-min(xs)-2*mg, max(ys)-min(ys)-2*mg)
-            circles = img.find_circles(threshold=1800, r_min=5, r_max=40,
-                                        roi=roi, x_margin=3, y_margin=3, r_margin=3)
+            blobs = img.find_blobs(RED_TARGET, roi=roi,
+                                   pixels_threshold=20, merge=True, margin=8)
         else:
-            circles = img.find_circles(threshold=1800, r_min=5, r_max=40)
+            blobs = img.find_blobs(RED_TARGET, pixels_threshold=30,
+                                   merge=True, margin=8)
 
-        if circles:
-            # 选 magnitude 最大的圆 (边缘最清晰)
-            c = max(circles, key=lambda x: x.magnitude())
-            if a4_ok and not target_in_center(c.x(), c.y(), a4_corners, 0.4):
-                pass  # 不在中心区, 跳过
-            else:
-                raw_cx = c.x(); raw_cy = c.y(); raw_r = c.r()
+        if blobs:
+            # 矩质心 (b.cx/cy) 对圆形比 bbox 中心精确
+            for b in sorted(blobs, key=lambda x: x.area(), reverse=True):
+                if b.density() < 0.4: continue
+                if a4_ok and not target_in_center(b.cx(), b.cy(), a4_corners, 0.35):
+                    continue
+                raw_cx = b.cx(); raw_cy = b.cy()
                 raw_ok = True
-                img.draw_circle(c.x(), c.y(), c.r(), color=(0,255,0), thickness=2)
+                img.draw_rectangle(b.x(),b.y(),b.w(),b.h(), color=(0,200,0), thickness=1)
+                break
 
         # ---- 5帧中值 + 2px死区 (准星稳定) ----
         if raw_ok:
