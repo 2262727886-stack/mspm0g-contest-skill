@@ -1728,6 +1728,63 @@ int main(void) {
 
 > **调参顺序**: 先设 B800 T=实测最大值×0.9 → P=0.5 I=0 D=0 → 看是否稳定 → 微量加 I
 
+#### 串口实时调参 (✅ 实测可用)
+
+串口发送命令修改 PID 参数，无需重编译烧录：
+
+```c
+// UART 命令解析 (主循环中调用)
+static void uart_poll_params(void) {
+    static int value = 0, mode = 0;  // 0=none 1=P 2=I 3=D 4=T 5=B
+
+    while (!DL_UART_isRXFIFOEmpty(UART_0_INST)) {
+        char c = (char)DL_UART_Main_receiveData(UART_0_INST);
+
+        if (c >= '0' && c <= '9') {
+            value = value * 10 + (c - '0');
+        } else if (c == 'P') { mode = 1; value = 0; }
+        else if (c == 'I')  { mode = 2; value = 0; }
+        else if (c == 'D')  { mode = 3; value = 0; }
+        else if (c == 'T')  { mode = 4; value = 0; }
+        else if (c == 'B')  { mode = 5; value = 0; }
+        else {
+            if (mode == 1) g_kp_x10 = value;      // P50 = Kp 5.0
+            if (mode == 2) g_ki_x100 = value;     // I8  = Ki 0.08
+            if (mode == 3) g_kd_x100 = value;     // D5  = Kd 0.05
+            if (mode == 4) g_target = value;      // T42 = 目标42
+            if (mode == 5) g_base_pwm = value;    // B800= 前馈800
+            if (mode) pid_apply_params();         // 复位PID
+            mode = 0; value = 0;
+        }
+    }
+}
+```
+
+**命令格式 (数值=实际值×10/100)：**
+
+| 命令 | 含义 | 示例 |
+|------|------|------|
+| `P5` | Kp = 0.5 | Kp×10 = 5 |
+| `I8` | Ki = 0.08 | Ki×100 = 8 |
+| `D0` | Kd = 0 | |
+| `T42` | target = 42 脉冲/周期 | |
+| `B800` | base PWM = 800 (前馈) | |
+| 回车 | **自动重置 PID，回显确认** | |
+
+**CSV 输出格式 (拷贝到 Excel/串口绘图工具)：**
+```
+count,pwm,target,Kp_x10,Ki_x100,Kd_x100,base_pwm
+62,590,42,5,8,0,800
+```
+
+**调参工作流：**
+1. 先发 `B999 T999` 满功率跑 → 记下最大 count = 上限
+2. `T=上限×0.9` → 设可达目标
+3. `B=上限附近 PWM` → 设前馈
+4. `P5 I0 D0` → P-only 看是否稳定
+5. `I8` → 加微量积分消除静差
+6. 振荡 → 降 P 或加 D
+
 ### 滤波器
 
 **一阶低通滤波器：**
