@@ -2,6 +2,47 @@
 
 MSPM0G3507 (天猛星) + K230 (庐山派) 双芯架构 25E 电赛完整参考。
 
+## Skill 使用教程
+
+在 Claude Code 中输入 `/mspm0g-contest` 加载完整电赛开发知识库。
+
+### 常用指令
+
+| 输入 | 功能 |
+|------|------|
+| `/mspm0g-contest 引脚分配` | 天猛星全引脚映射表 + 禁止使用引脚 |
+| `/mspm0g-contest GPIO` | GPIO 输出/输入/中断代码模板 |
+| `/mspm0g-contest PWM` | TIMG/TIMA PWM 配置+舵机+TB6612 |
+| `/mspm0g-contest 编码器` | TIMG QEI + GPIO 双边沿中断 |
+| `/mspm0g-contest I2C` | OLED SSD1306 / MPU6050 驱动 |
+| `/mspm0g-contest UART` | printf 重定向 / K230 通信 |
+| `/mspm0g-contest ADC` | TCRT5000 循迹 8路采样 |
+| `/mspm0g-contest 超声波` | HC-SR04 输入捕获测距 |
+| `/mspm0g-contest PID` | PID控制器 + 滤波器 + 卡尔曼 |
+| `/mspm0g-contest 舵机` | SG90/MG996R 50Hz 角度控制 |
+| `/mspm0g-contest 电机` | TB6612 + MG310 速度闭环 |
+| `/mspm0g-contest OLED驱动` | SSD1306 I2C 显示驱动 |
+| `/mspm0g-contest K230` | K230 摄像头 + 视觉检测 + 双芯通信 |
+| `/mspm0g-contest 25E方案` | 简易瞄准装置完整方案 |
+| `/mspm0g-contest 24H方案` | 自动行驶小车方案 |
+| `/mspm0g-contest 23E方案` | 运动目标追踪方案 |
+| `/mspm0g-contest 烧录` | XDS110/J-Link/BSL 烧录方法 |
+| `/mspm0g-contest VOFA+` | VOFA+ FireWater 实时调参 |
+| `/mspm0g-contest Flash` | Flash 参数存储 (校准值持久化) |
+| `/mspm0g-contest 看门狗` | WWDT 配置和喂狗 |
+| `/mspm0g-contest MPU6050` | 陀螺仪 DMP 姿态解算 |
+| `/mspm0g-contest 矩阵按键` | 4×4 矩阵键盘扫描 |
+| `/mspm0g-contest 蓝牙` | HC-05/06 UART1 无线调参 |
+
+### 正确提问姿势
+
+```
+❌ "帮我写个电机控制"          → 不知道什么电机、什么驱动、什么引脚
+✅ "TB6612驱动MG310电机，PWMA=PB15，AIN1=PA13，编码器=PA15/PA16"
+```
+
+**所有问题请带上实际引脚号**，Skill 会根据拓展板引脚生成直接可用的代码。
+
 ## 项目结构
 
 ```
