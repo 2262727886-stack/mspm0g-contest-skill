@@ -145,9 +145,21 @@ def target_in_center(cx, cy, corners, m=0.3):
     mx=m*cw/2; my=m*ch/2; ccx=(min(xs)+max(xs))/2; ccy=(min(ys)+max(ys))/2
     return abs(cx-ccx)<cw/2-mx and abs(cy-ccy)<ch/2-my
 
-# ===== 六、自动阈值校准 =====
+# ===== 六、自动阈值校准 (带验证) =====
+DEFAULT_TAPE  = (0, 100)      # 安全默认: 宽黑胶带范围
+DEFAULT_RED   = [(20, 90, 10, 127, -80, 80)]  # 安全默认: 宽红色范围
+
+def try_detect_a4(img):
+    """快速检测A4边框是否存在 (简化版, 仅验证用)"""
+    gray = img.to_grayscale(copy=True)
+    bin_img = gray.binary([TAPE_GRAY])
+    bin_img.open(1)
+    rects = [r for r in bin_img.find_rects(threshold=10000)
+             if r.w()*r.h() > IW*IH*0.03]
+    return len(rects) > 0
+
 def auto_calibrate():
-    """上电自动扫描靶面, 校准黑胶带灰度和红色靶心LAB阈值"""
+    """上电校准 + 验证: 失败自动回退安全默认值"""
     global TAPE_GRAY, RED_TARGET
 
     oled_cls()
@@ -156,76 +168,82 @@ def auto_calibrate():
     oled_str(0, 35, "Hold still 2s")
     oled_refresh()
 
-    # 采集30帧做统计分析
     gray_vals = []
-    red_labs = []  # [(L,A,B), ...]
+    red_labs = []
+    last_img = None
 
-    for _ in range(30):
+    for i in range(30):
         os.exitpoint()
         img = sensor.snapshot(chn=CAM_CHN_ID_0)
+        last_img = img
 
-        # ---- 灰度: 全图采样 (Otsu找黑白分界) ----
+        # 灰度 Otsu
         gray = img.to_grayscale(copy=True)
         hist = gray.get_histogram()
         otsu = hist.get_threshold()
         otsu_val = otsu.value() if hasattr(otsu, 'value') else int(otsu)
-        if 40 < otsu_val < 200:
+        if 50 < otsu_val < 180:      # 合理范围
             gray_vals.append(otsu_val)
 
-        # ---- 红色靶心: 中心区域 LAB 采样 ----
+        # 红色中心采样
         cx, cy = IW//2, IH//2
-        rw, rh = IW//6, IH//6
         try:
-            stat = img.get_statistics(roi=(cx-rw, cy-rh, 2*rw, 2*rh))
-            l_m = stat.l_mean(); a_m = stat.a_mean(); b_m = stat.b_mean()
-            l_s = stat.l_stdev(); a_s = stat.a_stdev(); b_s = stat.b_stdev()
-            if a_m > 5 and a_s > 3:
-                red_labs.append((l_m, a_m, b_m, l_s, a_s, b_s))
+            stat = img.get_statistics(roi=(cx-50, cy-40, 100, 80))
+            if stat.a_mean() > 5 and stat.a_stdev() > 3:
+                red_labs.append((stat.l_mean(), stat.a_mean(), stat.b_mean(),
+                                 stat.l_stdev(), stat.a_stdev(), stat.b_stdev()))
         except:
             pass
 
-        # 显示校准进度
-        img.draw_string_advanced(10, 110, 30,
-            f"CAL {_+1}/30", color=(255,255,0))
+        img.draw_string_advanced(10, 110, 30, f"CAL {i+1}/30", color=(255,255,0))
         Display.show_image(img)
         time.sleep_ms(20)
 
-    # ---- 灰度阈值 ----
+    # 应用阈值
+    cal_ok_tape = False
     if len(gray_vals) >= 5:
         otsu_avg = sum(gray_vals) // len(gray_vals)
-        # 黑胶带=0~otsu, 给15%余量
-        tape_hi = min(otsu_avg + 15, 200)
-        TAPE_GRAY = (0, tape_hi)
-        print(f"  TAPE_GRAY = (0, {tape_hi})  [Otsu={otsu_avg}]")
+        if 50 < otsu_avg < 180:
+            TAPE_GRAY = (0, min(otsu_avg + 15, 200))
+            cal_ok_tape = True
 
-    # ---- 红色阈值 ----
+    cal_ok_red = False
     if len(red_labs) >= 5:
-        ls = [r[0] for r in red_labs]; la = [r[1] for r in red_labs]
-        bs = [r[2] for r in red_labs]
-        l_avg = sum(ls)//len(ls); a_avg = sum(la)//len(la); b_avg = sum(bs)//len(bs)
-        # 以均值为中心, ±2倍标准差扩展
-        l_range = max(25, min(ls)//2 if min(ls)>0 else 10)  # 动态范围
-        a_range = max(30, int(sum(r[4] for r in red_labs)/len(red_labs)*2.5))
-        b_range = max(40, int(sum(r[5] for r in red_labs)/len(red_labs)*2.5))
-        RED_TARGET = [
-            (max(0, l_avg - l_range), min(100, l_avg + l_range),
-             max(0, a_avg - a_range), min(127, a_avg + a_range),
-             max(-128, b_avg - b_range), min(127, b_avg + b_range))
-        ]
-        print(f"  RED_TARGET = {RED_TARGET}")
-        print(f"  LAB center: L={l_avg} A={a_avg} B={b_avg}")
+        ls=[r[0] for r in red_labs]; la=[r[1] for r in red_labs]; bs=[r[2] for r in red_labs]
+        l_avg=sum(ls)//len(ls); a_avg=sum(la)//len(la); b_avg=sum(bs)//len(bs)
+        l_r=max(20, min(ls)//2); a_r=max(25, int(sum(r[4] for r in red_labs)/len(red_labs)*2.5))
+        b_r=max(35, int(sum(r[5] for r in red_labs)/len(red_labs)*2.5))
+        RED_TARGET=[(max(0,l_avg-l_r),min(100,l_avg+l_r),
+                      max(0,a_avg-a_r),min(127,a_avg+a_r),
+                      max(-128,b_avg-b_r),min(127,b_avg+b_r))]
+        cal_ok_red = True
 
-    # 显示结果
+    # ---- 验证: 用新阈值试检测A4 ----
+    verified = False
+    if last_img and cal_ok_tape:
+        for _ in range(5):  # 试5帧
+            os.exitpoint()
+            img = sensor.snapshot(chn=CAM_CHN_ID_0)
+            if try_detect_a4(img):
+                verified = True
+                break
+            time.sleep_ms(30)
+
+    # ---- 根据验证结果决定用哪个阈值 ----
     oled_cls()
-    oled_str(0, 0,  "Calibrated:")
-    oled_str(0, 14, f"Tape: 0-{TAPE_GRAY[1]}")
-    if len(red_labs) >= 5:
-        oled_str(0, 26, "Red: L:%d-%d" % (RED_TARGET[0][0], RED_TARGET[0][1]))
+    if verified:
+        oled_str(0, 0,  "Calibration OK")
     else:
-        oled_str(0, 26, "Red: default")
+        oled_str(0, 0,  "No target found")
+        # 验证失败 → 回退安全默认值
+        TAPE_GRAY = DEFAULT_TAPE
+        RED_TARGET = DEFAULT_RED
+
+    oled_str(0, 14, f"Tape: 0-{TAPE_GRAY[1]}")
+    oled_str(0, 26, "Red: %s" % ("OK" if cal_ok_red else "default"))
     oled_str(0, 40, "Ready!")
     oled_refresh()
-    time.sleep_ms(800)
+    time.sleep_ms(1000)
 
 # ===== 八、OLED 启动画面 =====
 oled_init()
