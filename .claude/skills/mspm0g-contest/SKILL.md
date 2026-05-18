@@ -207,59 +207,69 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 - **TIMG0 可用** — PB10(TIMG0_C0), PB11(TIMG0_C1)
 - **PA18 带有 BSL 功能** — 可能是 BSL 按键
 
-### 外设推荐引脚组合 (基于官方引脚表)
+### 25E 拓展板引脚速查 (SysConfig 已验证)
 
 ```c
-// === 竞赛常用引脚分配 (官方引脚表验证) ===
+// === 25E 竞赛拓展板引脚分配 (SysConfig 已验证) ===
 
 // 调试串口 (CH340, 固定不可改)
 // PA0 = UART0_TX, PA1 = UART0_RX
 
-// 电机 PWM (TB6612) — TIMA1 / TIMA0
-// PB0 = PWMA (TIMA0_C2), PB1 = PWMB (TIMA0_C3)
-// 方向: PA7(AIN1), PA14(AIN2), PA15(BIN1), PA18(BIN2)
-
-// 编码器 — TIMG6 (AB相)
-// PB2 = A相, PB3 = B相
-
-// OLED + MPU6050 — I2C0
+// OLED — I2C0
 // PA28 = SDA (I2C0_SDA), PA31 = SCL (I2C0_SCL)
 
-// TCRT5000 循迹 — ADC12
-// PA24=左1, PA25=左2, PA26=中, PA27=右2, PA29=右1 (5路)
+// MPU6050 — I2C1 (与OLED分离,独立总线)
+// PA10 = SDA (I2C1_SDA), PA11 = SCL (I2C1_SCL)
 
-// 舵机 — TIMA1
-// PA8 = Pan (TIMA1_C0), PA9 = Tilt (TIMA1_C1)
+// 电机 PWM (TB6612) — TIMG8
+// PB15 = PWMA (TIMG8_C0), PB16 = PWMB (TIMG8_C1)
+// 方向: PA13(AIN1), PA12(AIN2), PB0(BIN1), PB1(BIN2)
 
-// EC11 旋转编码器 (避开 PB2/PB3=编码器)
-// PA16 = A相, PA17 = B相, PB4 = 按键
+// 编码器A — GPIO双边沿中断 (TIMA1不支持QEI)
+// PA15 = A相, PA16 = B相
 
-// 激光笔 / 蜂鸣器
-// PA10 = 激光MOS, PA11 = 蜂鸣器
+// 编码器B — TIMG7 正交编码
+// PA17 = A相 (TIMG7_CH0), PA24 = B相 (TIMG7_CH1)
 
-// 板载LED (测试用)
-// PB22 = LED (低电平亮? 需实测)
+// 舵机 — TIMA0
+// PB9 = 舵机1 (TIMA0_CH1), PB8 = 舵机2 (TIMA0_CH0)
+
+// 超声波 HC-SR04
+// PA8 = TRIG, PA9 = ECHO
+
+// K230 通信 — UART3
+// PB2 = TX → K230, PB3 = RX ← K230
+
+// 蓝牙 — UART1
+// PB6 = RX (USART1_TX), PB7 = TX (USART1_RX)
+
+// TCRT5000 循迹 — ADC12 (8路)
+// PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7
+
+// 蜂鸣器 / LED / 按键
+// PB17 = 蜂鸣器, PB27 = LED, PA26 = K1, PA25 = K2
 ```
 
-### 外设引脚决策表
+### 外设引脚决策表 (拓展板)
 
-当用户提出硬件需求时按此表推荐引脚。**必须先询问用户实际接线再生成代码**。
+**生成代码时必须使用此表，不能使用默认推荐引脚。**
 
-| 外设需求 | 首选引脚 | 原因 |
-|----------|---------|------|
-| **电机 PWM** | PB0, PB1 (TIMA0_C2/C3) | TIMA0 支援死区 |
-| **编码器 AB** | PB2, PB3 (TIMG6) | 官方支持编码器模式 |
-| **舵机** | PA8, PA9 (TIMA1_C0/C1) | TIMA1 独立于 TIMA0 |
-| **I2C0** | PA28(SDA), PA31(SCL) | 官方引脚表确认 |
-| **TCRT5000** | PA24~PA27, PA29 | ADC12 5通道 |
-| **HC-SR04** | TRIG=PA15, ECHO=PB4 | 避开时钟区 |
-| **激光/蜂鸣器** | PA10/PA11 | GPIO 直驱 |
-| **EC11** | A=PA16, B=PA17, K=PB4 | 避开编码器 PB2/3 |
-| **矩阵按键** | 行=PB8~11, 列=PB12~15 | TIMG0 可在 PB10/11 |
-| **SPI0** | SCK=PB4, MOSI=PB6, MISO=PB7, CS=PB5 | 标准 SPI0 |
-| **K230 UART** | PA0(RX), PA1(TX) | 竞赛拔 USB |
-| **继电器** | PA7 | 避开 I2C/PWM |
-| **板载LED** | PB22 | 测试/调试用 |
+| 外设需求 | 拓展板引脚 | 片上资源 | 原因 |
+|----------|-----------|----------|------|
+| **OLED SDA/SCL** | PA28, PA31 | I2C0 | 板载上拉 |
+| **MPU6050 SDA/SCL** | PA10, PA11 | I2C1 | **独立总线**,不与OLED冲突 |
+| **电机 PWM** | PB15, PB16 | TIMG8_C0/C1 | 不与TIMA0冲突 |
+| **电机方向** | PA13,PA12,PB0,PB1 | GPIO | TB6612 AIN1/2, BIN1/2 |
+| **编码器A** | PA15, PA16 | GPIO双边沿中断 | TIMA1不支持QEI |
+| **编码器B** | PA17, PA24 | TIMG7_CH0/CH1 | 正交编码模式 |
+| **舵机** | PB9, PB8 | TIMA0_CH1/CH0 | 50Hz PWM |
+| **超声波** | PA8(TRIG), PA9(ECHO) | GPIO | 输入捕获 |
+| **K230 UART** | PB2(TX), PB3(RX) | UART3 | ✅ 不与CH340冲突 |
+| **蓝牙** | PB6(RX), PB7(TX) | UART1 | 无线调参 |
+| **TCRT5000** | 8路见上表 | ADC12 | 8路ADC |
+| **蜂鸣器** | PB17 | GPIO | 有源蜂鸣器 |
+| **LED** | PB27 | GPIO | 红色指示灯 |
+| **按键 K1/K2** | PA26, PA25 | GPIO IN | 上拉 |
 
 ---
 
