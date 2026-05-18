@@ -79,12 +79,15 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 ### 4. API 安全
 - 使用 SDK API 前必须确认该函数在当前版本 `mspm0_sdk_2_10_00_04` 的 `dl_xxx.h` 中**真实存在**
-- **已知不可用的 API（黑名单）**：
-  - `DL_GPIO_setDirection()` — 不存在，使用 `DL_GPIO_initDigitalOutput/Input(PINCMxx)`
-  - `DL_GPIO_setInternalResistor()` — 不存在，使用 `DL_GPIO_setDigitalInternalResistor(PINCMxx, ...)`
-  - `DL_ADC12_readMemResult()` — 不存在，使用 `DL_ADC12_getMemResult()`
-  - `DL_I2C_transmitBlocking()` / `DL_I2C_receiveBlocking()` — 不存在，使用 `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()`
-  - `DL_TimerG_getCounterValue()` — 不存在，使用 `DL_TimerG_getTimerCount()`
+- **已知不可用的 API（黑名单，经 SDK 2.10.00.04 dl_xxx.h 逐项确认）**：
+  - `DL_GPIO_setDirection()` — 不存在 (dl_gpio.h)
+  - `DL_GPIO_setInternalResistor()` — 不存在 (dl_gpio.h), 正确: `DL_GPIO_setDigitalInternalResistor(PINCMxx, ...)`
+  - `DL_ADC12_readMemResult()` — 不存在, 正确: `DL_ADC12_getMemResult()`
+  - `DL_I2C_transmitBlocking()` / `DL_I2C_receiveBlocking()` — 不存在, 正确: `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()`
+  - `DL_I2C_isBusy()` — 不存在, 正确: `DL_I2C_getControllerStatus(I2Cx, DL_I2C_CONTROLLER_STATUS_BUSY)`
+  - `DL_I2C_sendControllerStop()` — 不存在, STOP 由 `DL_I2C_startControllerTransfer()` 自动生成
+  - `DL_TimerG_setPeriod()` — 不存在, 周期在 SysConfig 中设置
+  - `DL_TimerG_getCounterValue()` — 不存在, 正确: `DL_TimerG_getTimerCount()` (= `DL_Timer_getTimerCount`)
 - **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---
@@ -920,8 +923,7 @@ void oled_write_cmd(uint8_t cmd) {
     uint8_t buf[2] = {0x00, cmd};
     DL_I2C_fillControllerTXFIFO(I2C0, buf, 2);
     DL_I2C_startControllerTransfer(I2C0, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    while (DL_I2C_isBusy(I2C0));
-    DL_I2C_sendControllerStop(I2C0);
+    while (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY));
 }
 
 void oled_write_data_buf(uint8_t *data, uint16_t len) {
@@ -932,8 +934,7 @@ void oled_write_data_buf(uint8_t *data, uint16_t len) {
         memcpy(buf + 1, data, chunk);
         DL_I2C_fillControllerTXFIFO(I2C0, buf, chunk + 1);
         DL_I2C_startControllerTransfer(I2C0, DL_I2C_CONTROLLER_DIRECTION_TX, chunk + 1);
-        while (DL_I2C_isBusy(I2C0));
-        DL_I2C_sendControllerStop(I2C0);
+        while (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY));
         data += chunk;
         len -= chunk;
     }
@@ -1018,19 +1019,19 @@ void mpu6050_write_reg(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = {reg, val};
     DL_I2C_fillControllerTXFIFO(I2C1, buf, 2);
     DL_I2C_startControllerTransfer(I2C1, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    while (DL_I2C_isBusy(I2C1));
-    DL_I2C_sendControllerStop(I2C1);
+    while (DL_I2C_getControllerStatus(I2C1, DL_I2C_CONTROLLER_STATUS_BUSY));
 }
 
 uint8_t mpu6050_read_reg(uint8_t reg) {
     uint8_t val = 0;
+    // 写寄存器地址 (STOP自动生成)
     DL_I2C_fillControllerTXFIFO(I2C1, &reg, 1);
     DL_I2C_startControllerTransfer(I2C1, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-    while (DL_I2C_isBusy(I2C1));
+    while (DL_I2C_getControllerStatus(I2C1, DL_I2C_CONTROLLER_STATUS_BUSY));
+    // 读数据
     DL_I2C_startControllerTransfer(I2C1, DL_I2C_CONTROLLER_DIRECTION_RX, 1);
-    while (DL_I2C_isBusy(I2C1));
+    while (DL_I2C_getControllerStatus(I2C1, DL_I2C_CONTROLLER_STATUS_BUSY));
     val = DL_I2C_receiveControllerData(I2C1);
-    DL_I2C_sendControllerStop(I2C1);
     return val;
 }
 
@@ -1485,18 +1486,16 @@ void main_loop(void) {
 
 ```c
 /* 发送前检查总线是否忙 */
-if (DL_I2C_isBusy(I2C0)) {
-    /* 上一次传输未完成, 跳过本次 */
-    return;
+if (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY)) {
+    return;  // 上次传输未完成, 跳过
 }
 
-/* 超时保护: 防止从设备不响应导致死等 */
+/* 超时保护: startControllerTransfer 自动生成 STOP, 无需手动 */
 #define I2C_TIMEOUT_MS  10
 uint32_t t0 = g_ms_ticks;
-while (DL_I2C_isBusy(I2C0)) {
+while (DL_I2C_getControllerStatus(I2C0, DL_I2C_CONTROLLER_STATUS_BUSY)) {
     if (g_ms_ticks - t0 > I2C_TIMEOUT_MS) {
-        /* 超时: 发送 STOP 恢复总线 */
-        DL_I2C_sendControllerStop(I2C0);
+        DL_I2C_disableStopCondition(I2C0);  // 异常时强制释放总线
         break;
     }
 }
@@ -2391,11 +2390,11 @@ void i2c_scan(DL_I2C_TypeDef *i2c) {
     for (uint8_t addr = 0x08; addr < 0x78; addr++) {
         DL_I2C_fillControllerTXFIFO(i2c, &addr, 1);
         DL_I2C_startControllerTransfer(i2c, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-        while (DL_I2C_isBusy(i2c));
-        if (!DL_I2C_getControllerStatus(i2c, DL_I2C_CONTROLLER_STATUS_ARB_LOST)) {
-            printf("0x%02X ", addr);
+        while (DL_I2C_getControllerStatus(i2c, DL_I2C_CONTROLLER_STATUS_BUSY));
+        if (DL_I2C_getControllerStatus(i2c, DL_I2C_CONTROLLER_STATUS_ADDR_ACK)) {
+            printf("0x%02X ", addr);  // 设备存在
         }
-        DL_I2C_sendControllerStop(i2c);
+        // STOP 由 startControllerTransfer 自动生成
     }
     printf("\r\n");
 }
