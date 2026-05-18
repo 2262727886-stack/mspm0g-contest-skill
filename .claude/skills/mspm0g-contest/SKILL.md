@@ -510,8 +510,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
         {
             "name": "MSPM0G3507_Config",
             "includePath": [
-                "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang",
-                "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang/Debug",
+                "${workspaceFolder}",
+                "${workspaceFolder}/Debug",
                 "C:/ti/mspm0_sdk_2_10_00_04/source",
                 "C:/ti/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include",
                 "C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/include"
@@ -532,8 +532,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
             "intelliSenseMode": "windows-clang-arm",
             "browse": {
                 "path": [
-                    "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang",
-                    "${workspaceFolder}/empty_LP_MSPM0G3507_nortos_ticlang/Debug",
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/Debug",
                     "C:/ti/mspm0_sdk_2_10_00_04/source"
                 ],
                 "limitSymbolsToIncludedHeaders": true
@@ -544,7 +544,21 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 }
 ```
 
-生成时必须把 `empty_LP_MSPM0G3507_nortos_ticlang` 替换为真实工程目录名。
+### 自动适配不同安装路径
+
+生成 `c_cpp_properties.json` 时替换以下路径：
+
+| 占位 | 说明 | 示例 |
+|------|------|------|
+| `SDK_PATH` | MSPM0 SDK 安装目录 | `C:/ti/mspm0_sdk_2_10_00_04` |
+| `CCS_COMPILER_PATH` | CCS 编译器目录 | `C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_*` |
+
+**生成规则**：
+1. `${workspaceFolder}` 和 `${workspaceFolder}/Debug` 始终有效，不用改
+2. SDK 路径按实际安装位置替换（常见: `C:/ti/mspm0_sdk_x_xx_xx_xx`）
+3. 编译器版本号 `4.0.3.LTS` 按实际 CCS 版本调整
+4. Debug 目录必须存在（SysConfig 生成的 `ti_msp_dl_config.h` 在此）
+5. 新建工程首次编译后，检查 `.vscode/` 是否自动生成；如未生成则手动按此模板创建
 
 ### main.c 框架
 ```c
