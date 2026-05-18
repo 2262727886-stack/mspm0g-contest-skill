@@ -11,12 +11,12 @@ import time, os, gc
 # ===== 一、摄像头初始化 (顺序不可变) =====
 sensor = Sensor(width=1920, height=1080)
 sensor.reset()
-sensor.set_framesize(width=320, height=240)
+sensor.set_framesize(width=640, height=480)   # VGA 满屏显示
 sensor.set_pixformat(Sensor.RGB565)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
 
-Display.init(Display.VIRT, width=640, height=480, to_ide=True)
+Display.init(Display.VIRT, width=640, height=480, to_ide=True)  # 匹配采集分辨率
 MediaManager.init()
 sensor.run()
 
@@ -99,7 +99,7 @@ TAPE_GRAY  = (0, 109)      # 黑胶带灰度, 启动后自动校准
 RED_TARGET = [(30, 90, 10, 127, -60, 60)]  # 红色靶心LAB, 启动后自动校准
 
 # ===== 四、A4 约束 =====
-IW, IH = 320, 240
+IW, IH = 640, 480
 A4_AREA_MIN = IW * IH * 0.03
 A4_AREA_MAX = IW * IH * 0.85
 STABLE_FRAMES = 3
@@ -110,8 +110,8 @@ target_ok = False; target_cx = 0; target_cy = 0
 tx_cm = 0.0; ty_cm = 0.0
 # 时间平滑 (EMA 低通滤波)
 smooth_cx = 0.0; smooth_cy = 0.0; smooth_ok = False
-ALPHA = 0.25   # 平滑系数: 越小越稳定, 0.1~0.3
-lost_cnt = 0   # 连续丢失帧数
+ALPHA = 0.45   # 平滑系数: 0.3~0.5 跟踪/稳定平衡
+lost_cnt = 0
 clock = time.clock(); fc = 0
 
 def pixel_to_cm(px, py):
@@ -123,7 +123,7 @@ def pixel_to_cm(px, py):
             cx = (min(xs) + max(xs)) // 2
             cy = (min(ys) + max(ys)) // 2
             return (px-cx)*50.0/bw, -(py-cy)*50.0/bh
-    return (px-160)*50.0/320, -(py-120)*50.0/240
+    return (px-320)*50.0/640, -(py-240)*50.0/480
 
 def a4_filter_valid(rects):
     good = []
@@ -176,8 +176,8 @@ def auto_calibrate():
             gray_vals.append(otsu_val)
 
         # ---- 红色靶心: 中心区域 LAB 采样 ----
-        cx, cy = IW // 2, IH // 2
-        rw, rh = IW // 6, IH // 6
+        cx, cy = 320, 240    # VGA 中心
+        rw, rh = 100, 80      # 中心采样区域
         try:
             stat = img.get_statistics(roi=(cx-rw, cy-rh, 2*rw, 2*rh))
             l_m = stat.l_mean(); a_m = stat.a_mean(); b_m = stat.b_mean()
@@ -305,7 +305,7 @@ try:
             else:
                 # 新位置在平滑位置附近才更新, 防跳变
                 dist = ((raw_cx - smooth_cx)**2 + (raw_cy - smooth_cy)**2) ** 0.5
-                if dist < 30:
+                if dist < 60:   # VGA分辨率放宽到60px
                     smooth_cx = ALPHA * raw_cx + (1 - ALPHA) * smooth_cx
                     smooth_cy = ALPHA * raw_cy + (1 - ALPHA) * smooth_cy
             target_cx = int(smooth_cx); target_cy = int(smooth_cy)
