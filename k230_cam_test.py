@@ -223,7 +223,7 @@ def auto_calibrate():
     oled_str(0, 0,  "Calibrated:")
     oled_str(0, 14, f"Tape: 0-{TAPE_GRAY[1]}")
     if len(red_labs) >= 5:
-        oled_str(0, 26, f"Red: L{A}={RED_TARGET[0][0]}-{RED_TARGET[0][1]}")
+        oled_str(0, 26, "Red: L:%d-%d" % (RED_TARGET[0][0], RED_TARGET[0][1]))
     else:
         oled_str(0, 26, "Red: default")
     oled_str(0, 40, "Ready!")
