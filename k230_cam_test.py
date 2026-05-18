@@ -94,9 +94,9 @@ def oled_str(x, y, s):
         cx += 6
         if cx > OLED_W - 6: cx = x; cy += 9
 
-# ===== 三、阈值 =====
-TAPE_GRAY  = (0, 109)
-RED_TARGET = [(52,100,24,127,-49,41), (29,73,19,127,-57,89)]
+# ===== 三、阈值 (自动校准填充) =====
+TAPE_GRAY  = (0, 109)      # 黑胶带灰度, 启动后自动校准
+RED_TARGET = [(30, 90, 10, 127, -60, 60)]  # 红色靶心LAB, 启动后自动校准
 
 # ===== 四、A4 约束 =====
 IW, IH = 320, 240
@@ -107,7 +107,7 @@ STABLE_FRAMES = 3
 # ===== 五、检测状态 =====
 a4_corners = None; a4_ok = False; a4_stable = 0; a4_last = None
 target_ok = False; target_cx = 0; target_cy = 0
-tx_cm = 0.0; ty_cm = 0.0  # 靶心物理坐标
+tx_cm = 0.0; ty_cm = 0.0
 clock = time.clock(); fc = 0
 
 def pixel_to_cm(px, py):
@@ -144,7 +144,87 @@ def target_in_center(cx, cy, corners, m=0.3):
     mx=m*cw/2; my=m*ch/2; ccx=(min(xs)+max(xs))/2; ccy=(min(ys)+max(ys))/2
     return abs(cx-ccx)<cw/2-mx and abs(cy-ccy)<ch/2-my
 
-# ===== 六、OLED 启动画面 =====
+# ===== 六、自动阈值校准 =====
+def auto_calibrate():
+    """上电自动扫描靶面, 校准黑胶带灰度和红色靶心LAB阈值"""
+    global TAPE_GRAY, RED_TARGET
+
+    oled_cls()
+    oled_str(0, 0, "Auto Calibrate...")
+    oled_str(0, 20, "Aim at target")
+    oled_str(0, 35, "Hold still 2s")
+    oled_refresh()
+
+    # 采集30帧做统计分析
+    gray_vals = []
+    red_labs = []  # [(L,A,B), ...]
+
+    for _ in range(30):
+        os.exitpoint()
+        img = sensor.snapshot(chn=CAM_CHN_ID_0)
+
+        # ---- 灰度: 全图采样 (Otsu找黑白分界) ----
+        gray = img.to_grayscale(copy=True)
+        hist = gray.get_histogram()
+        # Otsu 自动阈值 → 黑胶带/白纸分界
+        otsu = hist.get_threshold()
+        if 40 < otsu < 200:   # 合理范围才采纳
+            gray_vals.append(otsu)
+
+        # ---- 红色靶心: 中心区域 LAB 采样 ----
+        cx, cy = IW // 2, IH // 2
+        rw, rh = IW // 6, IH // 6  # 中心 1/6 区域
+        try:
+            stat = img.get_statistics(roi=(cx-rw, cy-rh, 2*rw, 2*rh))
+            # LAB 均值: stat.l_mean(), stat.a_mean(), stat.b_mean()
+            l_m = stat.l_mean(); a_m = stat.a_mean(); b_m = stat.b_mean()
+            l_s = stat.l_stdev(); a_s = stat.a_stdev(); b_s = stat.b_stdev()
+            # 只采样有红色的帧 (A通道正值=偏红)
+            if a_m > 5 and a_s > 3:
+                red_labs.append((l_m, a_m, b_m, l_s, a_s, b_s))
+        except:
+            pass
+
+        time.sleep_ms(20)
+
+    # ---- 灰度阈值 ----
+    if len(gray_vals) >= 5:
+        otsu_avg = sum(gray_vals) // len(gray_vals)
+        # 黑胶带=0~otsu, 给15%余量
+        tape_hi = min(otsu_avg + 15, 200)
+        TAPE_GRAY = (0, tape_hi)
+        print(f"  TAPE_GRAY = (0, {tape_hi})  [Otsu={otsu_avg}]")
+
+    # ---- 红色阈值 ----
+    if len(red_labs) >= 5:
+        ls = [r[0] for r in red_labs]; la = [r[1] for r in red_labs]
+        bs = [r[2] for r in red_labs]
+        l_avg = sum(ls)//len(ls); a_avg = sum(la)//len(la); b_avg = sum(bs)//len(bs)
+        # 以均值为中心, ±2倍标准差扩展
+        l_range = max(25, min(ls)//2 if min(ls)>0 else 10)  # 动态范围
+        a_range = max(30, int(sum(r[4] for r in red_labs)/len(red_labs)*2.5))
+        b_range = max(40, int(sum(r[5] for r in red_labs)/len(red_labs)*2.5))
+        RED_TARGET = [
+            (max(0, l_avg - l_range), min(100, l_avg + l_range),
+             max(0, a_avg - a_range), min(127, a_avg + a_range),
+             max(-128, b_avg - b_range), min(127, b_avg + b_range))
+        ]
+        print(f"  RED_TARGET = {RED_TARGET}")
+        print(f"  LAB center: L={l_avg} A={a_avg} B={b_avg}")
+
+    # 显示结果
+    oled_cls()
+    oled_str(0, 0,  "Calibrated:")
+    oled_str(0, 14, f"Tape: 0-{TAPE_GRAY[1]}")
+    if len(red_labs) >= 5:
+        oled_str(0, 26, f"Red: L{A}={RED_TARGET[0][0]}-{RED_TARGET[0][1]}")
+    else:
+        oled_str(0, 26, "Red: default")
+    oled_str(0, 40, "Ready!")
+    oled_refresh()
+    time.sleep_ms(800)
+
+# ===== 八、OLED 启动画面 =====
 oled_init()
 oled_cls()
 oled_str(0, 0,  "K230 25E Test")
@@ -155,9 +235,12 @@ oled_str(0, 55, "I2C0 0x3C OK")
 oled_refresh()
 time.sleep_ms(1000)
 
+# 自动校准阈值 (靶面对准摄像头, 保持静止2秒)
+auto_calibrate()
+
 print("QVGA 320×240 + OLED, 开始检测...")
 
-# ===== 七、主循环 =====
+# ===== 九、主循环 =====
 try:
     while True:
         os.exitpoint()
