@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "TMX_MSPM0G3507_ProjectTemplate",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "TMX_MSPM0G3507_ProjectTemplate",
+                "resourceId": "/TMX_MSPM0G3507_ProjectTemplate"
+            },
+            "debuggerSettings": {
+                "targetConfigs/MSPM0G3507.ccxml": {
+                    "Texas Instruments XDS110 USB Debug Probe/CORTEX_M0P": {
+                        "data": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n<PropertyValues/>\n"
+                    }
+                }
+            }
+        }
+    ]
+}

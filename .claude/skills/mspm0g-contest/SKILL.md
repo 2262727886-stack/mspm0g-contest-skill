@@ -94,6 +94,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
   - `DL_WDT_feed/enable/setPeriod/getCount(WDT)` — 全部不存在, 外设名为 WWDT, 喂狗= `DL_WWDT_restart(WWDT0_INST)`, 配置全在 SysConfig
   - `DL_FlashCTL_eraseSector(sector)` — 不存在, 正确: `DL_FlashCTL_eraseMemoryFromRAM(FLASHCTL, addr, size)`
   - `DL_FlashCTL_programMemory(addr, data, len)` — 不存在, 正确: `DL_FlashCTL_programMemoryFromRAM32/64WithECCGenerated(FLASHCTL, addr, &data)`
+  - `DL_TimerG_setCaptureCompareValue(inst, value, index)` — **参数顺序错误**, 正确: `DL_TimerG_setCaptureCompareValue(inst, INDEX, VALUE)`
 - **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---

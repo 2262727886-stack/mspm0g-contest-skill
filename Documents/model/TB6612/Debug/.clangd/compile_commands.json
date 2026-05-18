@@ -1,0 +1,17 @@
+[
+   {
+      "directory" : "C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Debug",
+      "command"   : "clang++ -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Board\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/BSP\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/BSP/inc\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Debug\" -I\"C:/ti/mspm0_sdk_2_02_00_05/source/third_party/CMSIS/Core/Include\" -I\"C:/ti/mspm0_sdk_2_02_00_05/source\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/c++/v1\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/lib/clang/18/include\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/c\"",
+      "file"      : "C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Board/board.c"
+   },
+   {
+      "directory" : "C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Debug",
+      "command"   : "clang++ -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Board\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/BSP\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/BSP/inc\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Debug\" -I\"C:/ti/mspm0_sdk_2_02_00_05/source/third_party/CMSIS/Core/Include\" -I\"C:/ti/mspm0_sdk_2_02_00_05/source\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/c++/v1\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/lib/clang/18/include\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/c\"",
+      "file"      : "C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/empty.c"
+   },
+   {
+      "directory" : "C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Debug",
+      "command"   : "clang++ -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Board\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/BSP\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/BSP/inc\" -I\"C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/Debug\" -I\"C:/ti/mspm0_sdk_2_02_00_05/source/third_party/CMSIS/Core/Include\" -I\"C:/ti/mspm0_sdk_2_02_00_05/source\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/c++/v1\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/lib/clang/18/include\" -isystem\"F:/Ti/CCS/ccs/tools/compiler/ti-cgt-armllvm_4.0.0.LTS/include/c\"",
+      "file"      : "C:/Users/Administrator/Desktop/TMX_MSPM0G3507_ProjectTemplate/BSP/src/bsp_tb6612.c"
+   }
+]

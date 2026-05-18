@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<configurations XML_version="1.2" id="configurations_0">
+    
+    <configuration XML_version="1.2" id="SEGGER J-Link Emulator_0">
+        <instance XML_version="1.2" desc="SEGGER J-Link Emulator_0" href="connections/segger_j-link_connection.xml" id="SEGGER J-Link Emulator_0" xml="segger_j-link_connection.xml" xmlpath="connections"/>
+        <connection XML_version="1.2" id="SEGGER J-Link Emulator_0">
+            <instance XML_version="1.2" href="drivers/jlinkcs_dap.xml" id="drivers" xml="jlinkcs_dap.xml" xmlpath="drivers"/>
+            <instance XML_version="1.2" href="drivers/jlinkcortexm0p.xml" id="drivers" xml="jlinkcortexm0p.xml" xmlpath="drivers"/>
+            <instance XML_version="1.2" href="drivers/jlinksec_ap.xml" id="drivers" xml="jlinksec_ap.xml" xmlpath="drivers"/>
+            <platform XML_version="1.2" id="platform_0">
+                <instance XML_version="1.2" desc="MSPM0G3507_0" href="devices/MSPM0G3507.xml" id="MSPM0G3507_0" xml="MSPM0G3507.xml" xmlpath="devices"/>
+            </platform>
+        </connection>
+    </configuration>
+</configurations>
