@@ -90,6 +90,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
   - `DL_TimerG_setPeriod()` — 不存在, 周期在 SysConfig 中设置
   - `DL_TimerG_getCounterValue()` — 不存在, 正确: `DL_TimerG_getTimerCount()` (= `DL_Timer_getTimerCount`)
   - `DL_SPI_transferBlocking()` — 不存在, 正确: `DL_SPI_transmitDataBlocking8/16/32()` + `DL_SPI_receiveDataBlocking8/16/32()`
+  - `DL_WDT_feed/enable/setPeriod/getCount(WDT)` — 全部不存在, 外设名为 WWDT, 喂狗= `DL_WWDT_restart(WWDT0_INST)`, 配置全在 SysConfig
 - **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---
@@ -697,7 +698,7 @@ int main(void) {
 
     while (1) {
         // 业务逻辑: 读传感器 → PID → 控电机 → 喂狗
-        DL_WDT_feed(WDT);
+        DL_WWDT_restart(WWDT0_INST);  // 喂狗
     }
 }
 ```
@@ -1866,59 +1867,48 @@ void button_update(Button *btn, bool pressed) {
 
 ### 基础代码
 
+> SDk 外设名为 **WWDT** (Window Watchdog Timer)，API 前缀 `DL_WWDT_`，不是 `DL_WDT_`。
+
 ```c
 #include "ti_msp_dl_config.h"
 
 int main(void)
 {
-    SYSCFG_DL_init();
+    SYSCFG_DL_init();  // SysConfig 已完成 WWDT 全部配置和使能
 
-    /* WDT 使能 (SysConfig 自动生成 DL_WDT_enable) */
-    /* ⚠️ 使能后必须按时喂狗, 否则 1 秒后复位 */
-    printf("System boot, WDT enabled\r\n");
+    printf("System boot, WWDT enabled\r\n");
 
     while (1)
     {
-        /* === 控制循环 === */
         read_sensors();
         pid_control();
         motor_output();
 
-        /* === 喂狗 (必须放在主循环能到达的地方) === */
-        DL_WDT_feed(WDT);
-        /* 如果上面任何一步卡死 > 1 秒 → 自动复位 */
+        /* 喂狗: DL_WWDT_restart, 不是 DL_WDT_feed! */
+        DL_WWDT_restart(WWDT0_INST);
     }
 }
 ```
 
-### 中断里喂狗 (错误示范)
+### 中断里喂狗
 
 ```c
-/* ❌ 危险! 中断里喂狗是假安全 */
-void SysTick_Handler(void) {
-    DL_WDT_feed(WDT);  // 中断还在跑但主循环卡死了!
+/* 中断喂狗在特定条件下可接受 (如 SDK 例程 wwdt_window_mode_periodic_reset) */
+/* 但25E推荐主循环喂狗: 最简单的安全保证 */
+void TIMER_0_INST_IRQHandler(void) {
+    // 如果定时器和WWDT窗口对齐, 可以在此喂狗
+    DL_WWDT_restart(WWDT0_INST);
 }
-/* 正确: 必须在主循环喂狗, 中断只负责置标志 */
 ```
 
-### 关键 API
+### 关键 API (dl_wwdt.h)
 
 | 函数 | 作用 |
 |------|------|
-| `DL_WDT_setPeriod(WDT, period)` | 设置超时周期 |
-| `DL_WDT_enable(WDT)` | 使能看门狗 |
-| `DL_WDT_feed(WDT)` | 清零计数器 (喂狗) |
-| `DL_WDT_getCount(WDT)` | 读当前计数值 (调试用) |
+| `DL_WWDT_restart(WWDT0_INST)` | 喂狗 (清零计数器) |
+| `DL_WWDT_isRunning(WWDT0_INST)` | 检查是否运行中 |
 
-### 周期选项
-
-| 宏 | 大致时间 | 适用场景 |
-|----|---------|----------|
-| `DL_WDT_PERIOD_100MS` | 100ms | 高速控制, 喂狗频繁 |
-| `DL_WDT_PERIOD_500MS` | 500ms | 一般控制 |
-| `DL_WDT_PERIOD_1S` | **1 秒** | 推荐, 容忍短暂阻塞 |
-| `DL_WDT_PERIOD_2S` | 2 秒 | 宽松, 适合慢速循环 |
-| `DL_WDT_PERIOD_5S` | 5 秒 | 宽松, 适合 OLED 刷新 |
+> 周期/窗口/使能全在 SysConfig GUI 配置, 没有 `DL_WDT_setPeriod/enable/getCount` 等函数。
 
 ### 复位原因检测
 
