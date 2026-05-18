@@ -1,32 +1,63 @@
-/**
- * PID 控制器实现
+/*
+ * Position PID controller with integral and output limiting.
  */
 #include "pid.h"
 
-void PID_Init(PID_t *pid, float kp, float ki, float kd, float out_min, float out_max) {
-    pid->Kp = kp; pid->Ki = ki; pid->Kd = kd;
-    pid->setpoint = 0;
-    pid->integral = 0;
-    pid->prev_error = 0;
-    pid->out_min = out_min;
-    pid->out_max = out_max;
+static float clamp_float(float value, float min_value, float max_value)
+{
+    if (value > max_value) {
+        return max_value;
+    }
+    if (value < min_value) {
+        return min_value;
+    }
+    return value;
 }
 
-float PID_Update(PID_t *pid, float measurement, float dt) {
-    float error = pid->setpoint - measurement;
-    float p_out = pid->Kp * error;
+void pid_init(PID *pid, float kp, float ki, float kd,
+              float max_integral, float max_output, float target)
+{
+    pid->kp = kp;
+    pid->ki = ki;
+    pid->kd = kd;
+    pid->max_integral = max_integral;
+    pid->max_output = max_output;
+    pid->target = target;
+    pid_reset(pid);
+}
 
-    pid->integral += error * dt;
-    // 积分限幅
-    if (pid->integral > pid->out_max)  pid->integral = pid->out_max;
-    if (pid->integral < pid->out_min)  pid->integral = pid->out_min;
-    float i_out = pid->Ki * pid->integral;
+void pid_reset(PID *pid)
+{
+    pid->error = 0.0f;
+    pid->last_error = 0.0f;
+    pid->integral = 0.0f;
+    pid->output = 0.0f;
+}
 
-    float d_out = pid->Kd * (measurement - pid->prev_error) / dt;
-    pid->prev_error = measurement;
+void pid_set_target(PID *pid, float target)
+{
+    pid->target = target;
+}
 
-    float out = p_out + i_out + d_out;
-    if (out > pid->out_max)  out = pid->out_max;
-    if (out < pid->out_min)  out = pid->out_min;
-    return out;
+float pid_calc(PID *pid, float current)
+{
+    float derivative;
+
+    pid->last_error = pid->error;
+    pid->error = pid->target - current;
+
+    pid->integral += pid->error;
+    pid->integral = clamp_float(pid->integral,
+                                -pid->max_integral,
+                                pid->max_integral);
+
+    derivative = pid->error - pid->last_error;
+    pid->output = pid->kp * pid->error +
+                  pid->ki * pid->integral +
+                  pid->kd * derivative;
+
+    pid->output = clamp_float(pid->output,
+                              -pid->max_output,
+                              pid->max_output);
+    return pid->output;
 }

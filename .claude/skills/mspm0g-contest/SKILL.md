@@ -1645,51 +1645,88 @@ void oled_update_partial(uint8_t page_start, uint8_t page_end) {
 
 ## 八、控制算法
 
-### PID 控制器
+### PID 控制器 (⚠️ 重点章节 — 实测调参验证)
+
+#### 架构铁律
+
+```
+前馈 PWM (Base) + PID 增量 — 不要从 0 起调!
+┌──────────┐     ┌──────────┐     ┌───────────┐
+│ SysTick  │ ──→ │ Encoder  │ ──→ │ PID calc  │ ──→ PWM = Base ± Δ
+│ 10/20ms  │     │ Update() │     │ (position)│
+└──────────┘     └──────────┘     └───────────┘
+      ↑ 固定周期! 不能用主循环count!
+```
+
+#### 已验证的实现
 
 ```c
+// pid.h — 位置式 PID (编码器脉冲计数域)
 typedef struct {
-    float Kp, Ki, Kd;           // 系数
-    float setpoint;             // 目标值
-    float integral;             // 积分累加
-    float prev_error;           // 上次误差
-    float out_min, out_max;     // 输出限幅
-    float integral_limit;       // 积分分离阈值
-} PID_Controller;
+    float kp, ki, kd;
+    float target, error, last_error, integral;
+    float max_integral, max_output, output;
+} PID;
 
-float pid_update(PID_Controller *pid, float measurement, float dt) {
-    float error = pid->setpoint - measurement;
+void pid_init(PID *pid, float kp, float ki, float kd,
+              float max_integral, float max_output, float target);
+float pid_calc(PID *pid, float current);  // PID_OUT = Kp*E + Ki*ΣE + Kd*dE
 
-    // 比例
-    float p_out = pid->Kp * error;
+// 主循环框架 (SysTick 10ms)
+#define PID_PERIOD_MS         (10U)
+#define PID_SYSTICK_LOAD      (CPUCLK_FREQ / 1000U * PID_PERIOD_MS)
+#define PID_MAX_INTEGRAL      (2500.0f)
+#define PWM_STEP_LIMIT        (4)          // 每次调节不超过±4
 
-    // 积分 (带分离 — 大误差时不积分)
-    if (fabsf(error) < pid->integral_limit) {
-        pid->integral += error * dt;
+volatile uint8_t g_pid_tick = 0;
+void SysTick_Handler(void) { g_pid_tick = 1; }
+
+int main(void) {
+    SYSCFG_DL_init(); __enable_irq();
+    Motor_Init(); Encoder_Init();
+    DL_TimerG_startCounter(PWM_TB6612_INST);
+    DL_SYSTICK_config(PID_SYSTICK_LOAD);  // 硬件定时器, 不是delay!
+
+    pid_init(&pid, 0.5f, 0.08f, 0.0f, 2500, 1000, 42);
+    int base_pwm = 800;  // 前馈! 不是从0开始
+
+    while (1) {
+        Encoder_Tick();  // 全速轮询
+
+        if (g_pid_tick) {
+            g_pid_tick = 0;
+            Encoder_Update();
+            int count = abs(Encoder_GetCount());
+
+            int pwm = base_pwm + (int)pid_calc(&pid, (float)count);
+            pwm = clamp(pwm, 0, 1000);
+            pwm = step_limit(pwm, last_pwm, PWM_STEP_LIMIT);
+            last_pwm = pwm;
+            Motor_B(pwm);
+        }
     }
-    float i_out = pid->Ki * pid->integral;
-
-    // 微分 (对测量值微分，避免微分冲击)
-    float d_out = pid->Kd * (measurement - pid->prev_error) / dt;
-    pid->prev_error = measurement;
-
-    // 输出合成 + 限幅 + 抗饱和
-    float output = p_out + i_out + d_out;
-    if (output > pid->out_max) {
-        output = pid->out_max;
-        // 抗积分饱和：超限时不累积积分
-    } else if (output < pid->out_min) {
-        output = pid->out_min;
-    }
-
-    return output;
-}
-
-void pid_reset(PID_Controller *pid) {
-    pid->integral = 0;
-    pid->prev_error = 0;
 }
 ```
+
+#### ⚠️ 调参必读 (6 大陷阱)
+
+| # | 陷阱 | 后果 | 正确做法 |
+|---|------|------|---------|
+| **1** | **PID 从 0 开始** | 电机不起转,积分饱和 | **前馈 Base PWM=800**,PID 只做 ±200 微调 |
+| **2** | **主循环 delay 当采样** | UART 阻塞导致周期不准 | **SysTick 硬件定时器**, 10ms 固定周期 |
+| **3** | **PWM 跳变太大** | 电机抽搐抖动 | **步进限幅 ±4/次**, 防突变 |
+| **4** | **目标超过物理上限** | PID 永远在饱和 | 先满 PWM 测最大计数, 目标×0.95 |
+| **5** | **编码器负值直入 PID** | error 方向反了 | **abs(count)** 取绝对值 |
+| **6** | **`setCaptureCompareValue` 参数反** | PWM 写入错通道 | 正确: `(inst, VALUE, INDEX)` |
+
+#### 实测参数 (MG310 + TB6612 + 电池 7.4V)
+
+| 采样周期 | Base PWM | Kp | Ki | Kd | 目标 | 实测计数 |
+|----------|---------|-----|-----|-----|------|---------|
+| 10ms | 800 | 0.5 | 0.08 | 0 | 42 | 41~43 |
+| 20ms | 800 | 0.5 | 0.08 | 0 | 80 | 82~86 |
+
+> **调参顺序**: 先设 B800 T=实测最大值×0.9 → P=0.5 I=0 D=0 → 看是否稳定 → 微量加 I
 
 ### 滤波器
 

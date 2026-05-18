@@ -1,30 +1,28 @@
 /**
- * 编码器B — 高速轮询模式 (不依赖中断)
- * PA17(A相) PA24(B相), 主循环全速采样
+ * 编码器 — 轮询 + 周期清零
  */
 #include "encoder.h"
 
-static volatile int32_t enc_count = 0;
-static uint8_t last_a = 0, last_b = 0;
+static int enc_count = 0, enc_latched = 0;
+static uint8_t la, lb;
 
 void Encoder_Init(void) {
-    last_a = (DL_GPIO_readPins(GPIO_ENC_B_PORT, GPIO_ENC_B_ENC_B_A_PIN) != 0);
-    last_b = (DL_GPIO_readPins(GPIO_ENC_B_PORT, GPIO_ENC_B_ENC_B_B_PIN) != 0);
-}
-
-int32_t Encoder_Read(void) {
-    return enc_count;
+    la = (DL_GPIO_readPins(GPIO_ENC_B_PORT, GPIO_ENC_B_ENC_B_A_PIN) != 0);
+    lb = (DL_GPIO_readPins(GPIO_ENC_B_PORT, GPIO_ENC_B_ENC_B_B_PIN) != 0);
 }
 
 void Encoder_Tick(void) {
     uint8_t a = (DL_GPIO_readPins(GPIO_ENC_B_PORT, GPIO_ENC_B_ENC_B_A_PIN) != 0);
     uint8_t b = (DL_GPIO_readPins(GPIO_ENC_B_PORT, GPIO_ENC_B_ENC_B_B_PIN) != 0);
-    if (a != last_a) {
-        enc_count += (a == b) ? 1 : -1;
-        last_a = a;
-    }
-    if (b != last_b) {
-        enc_count += (a != b) ? 1 : -1;
-        last_b = b;
-    }
+    if (a != la) { enc_count += (a == b) ? 1 : -1; la = a; }
+    if (b != lb) { enc_count += (a != b) ? 1 : -1; lb = b; }
+}
+
+void Encoder_Update(void) {
+    enc_latched = enc_count;
+    enc_count = 0;
+}
+
+int Encoder_GetCount(void) {
+    return enc_latched;
 }
