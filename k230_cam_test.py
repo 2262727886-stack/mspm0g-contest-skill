@@ -110,7 +110,8 @@ target_ok = False; target_cx = 0; target_cy = 0
 tx_cm = 0.0; ty_cm = 0.0
 # 时间平滑 (EMA 低通滤波)
 lost_cnt = 0
-med_buf = []  # 3帧中值滤波缓冲
+med_buf = []    # 5帧中值滤波
+disp_cx = 0; disp_cy = 0  # 显示位置 (带死区)
 clock = time.clock(); fc = 0
 
 def pixel_to_cm(px, py):
@@ -297,14 +298,20 @@ try:
                 raw_ok = True
                 img.draw_circle(c.x(), c.y(), c.r(), color=(0,255,0), thickness=2)
 
-        # ---- 3帧中值滤波 (零延迟消抖) ----
+        # ---- 5帧中值 + 2px死区 (准星稳定) ----
         if raw_ok:
             lost_cnt = 0
             med_buf.append((raw_cx, raw_cy))
-            if len(med_buf) > 3: med_buf.pop(0)
+            if len(med_buf) > 5: med_buf.pop(0)
             xs = sorted(p[0] for p in med_buf)
             ys = sorted(p[1] for p in med_buf)
-            target_cx = xs[len(xs)//2]; target_cy = ys[len(ys)//2]
+            new_cx = xs[len(xs)//2]; new_cy = ys[len(ys)//2]
+
+            # 死区: 变化<2px不更新显示位置, 消除微小抖动
+            if abs(new_cx - disp_cx) >= 2 or abs(new_cy - disp_cy) >= 2:
+                disp_cx = new_cx; disp_cy = new_cy
+
+            target_cx = disp_cx; target_cy = disp_cy
             target_ok = True
             tx_cm, ty_cm = pixel_to_cm(target_cx, target_cy)
         else:
