@@ -166,25 +166,27 @@ def auto_calibrate():
         # ---- 灰度: 全图采样 (Otsu找黑白分界) ----
         gray = img.to_grayscale(copy=True)
         hist = gray.get_histogram()
-        # Otsu 自动阈值 → 黑胶带/白纸分界
         otsu = hist.get_threshold()
-        if 40 < otsu < 200:   # 合理范围才采纳
-            gray_vals.append(otsu)
+        otsu_val = otsu.value() if hasattr(otsu, 'value') else int(otsu)
+        if 40 < otsu_val < 200:
+            gray_vals.append(otsu_val)
 
         # ---- 红色靶心: 中心区域 LAB 采样 ----
         cx, cy = IW // 2, IH // 2
-        rw, rh = IW // 6, IH // 6  # 中心 1/6 区域
+        rw, rh = IW // 6, IH // 6
         try:
             stat = img.get_statistics(roi=(cx-rw, cy-rh, 2*rw, 2*rh))
-            # LAB 均值: stat.l_mean(), stat.a_mean(), stat.b_mean()
             l_m = stat.l_mean(); a_m = stat.a_mean(); b_m = stat.b_mean()
             l_s = stat.l_stdev(); a_s = stat.a_stdev(); b_s = stat.b_stdev()
-            # 只采样有红色的帧 (A通道正值=偏红)
             if a_m > 5 and a_s > 3:
                 red_labs.append((l_m, a_m, b_m, l_s, a_s, b_s))
         except:
             pass
 
+        # 显示校准进度
+        img.draw_string_advanced(10, 110, 30,
+            f"CAL {_+1}/30", color=(255,255,0))
+        Display.show_image(img)
         time.sleep_ms(20)
 
     # ---- 灰度阈值 ----
