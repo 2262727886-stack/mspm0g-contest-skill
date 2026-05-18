@@ -875,7 +875,36 @@ void TIMG7_IRQHandler(void) {
 }
 ```
 
-**编码器A 读取 (GPIO 双边沿中断, PA15/PA16)：**
+**编码器读取 — 推荐高速轮询方案 (✅ 实测验证)：**
+
+> ⚠️ MSPM0G3507 GPIO 双边沿中断在编码器高频场景下**实测不触发**。QEI 模块仅支持 TIMG8（已被 PWM 占用）。推荐主循环高速轮询，GMR 500PPR 满速不漏脉冲。
+
+```c
+// encoder.h — 高速轮询编码器
+void Encoder_Init(void);      // 初始化状态
+void Encoder_Tick(void);      // 高速轮询, 主循环每迭代调用
+int32_t Encoder_Read(void);   // 读取累计脉冲数
+
+// encoder.c — 实现
+static volatile int32_t enc_count = 0;
+static uint8_t last_a = 0, last_b = 0;
+
+void Encoder_Tick(void) {
+    uint8_t a = (DL_GPIO_readPins(ENC_PORT, ENC_A_PIN) != 0);
+    uint8_t b = (DL_GPIO_readPins(ENC_PORT, ENC_B_PIN) != 0);
+    if (a != last_a) { enc_count += (a == b) ? 1 : -1; last_a = a; }
+    if (b != last_b) { enc_count += (a != b) ? 1 : -1; last_b = b; }
+}
+
+// 主循环
+while (1) {
+    Encoder_Tick();           // 全速轮询, >1MHz 采样
+    // ... 其他逻辑
+    // 每 200ms: int32_t cnt = Encoder_Read();
+}
+```
+
+**编码器A 读取 (GPIO 双边沿中断, PA15/PA16) — 仅做参考：**
 ```c
 // 25E 拓展板: 电机A编码器=PA15(A相), PA16(B相)
 // TIMA1不支持QEI, 用 GPIO 双边沿中断软件解码

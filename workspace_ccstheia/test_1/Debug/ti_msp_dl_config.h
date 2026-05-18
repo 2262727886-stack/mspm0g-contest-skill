@@ -140,6 +140,20 @@ extern "C" {
 #define GPIO_TB6612_BIN2_PORT                                            (GPIOB)
 #define GPIO_TB6612_BIN2_PIN                                     (DL_GPIO_PIN_1)
 #define GPIO_TB6612_BIN2_IOMUX                                   (IOMUX_PINCM13)
+/* Port definition for Pin Group GPIO_ENC_B */
+#define GPIO_ENC_B_PORT                                                  (GPIOA)
+
+/* Defines for ENC_B_A: GPIOA.17 with pinCMx 39 on package pin 10 */
+// pins affected by this interrupt request:["ENC_B_A","ENC_B_B"]
+#define GPIO_ENC_B_INT_IRQN                                     (GPIOA_INT_IRQn)
+#define GPIO_ENC_B_INT_IIDX                     (DL_INTERRUPT_GROUP1_IIDX_GPIOA)
+#define GPIO_ENC_B_ENC_B_A_IIDX                             (DL_GPIO_IIDX_DIO17)
+#define GPIO_ENC_B_ENC_B_A_PIN                                  (DL_GPIO_PIN_17)
+#define GPIO_ENC_B_ENC_B_A_IOMUX                                 (IOMUX_PINCM39)
+/* Defines for ENC_B_B: GPIOA.24 with pinCMx 54 on package pin 25 */
+#define GPIO_ENC_B_ENC_B_B_IIDX                             (DL_GPIO_IIDX_DIO24)
+#define GPIO_ENC_B_ENC_B_B_PIN                                  (DL_GPIO_PIN_24)
+#define GPIO_ENC_B_ENC_B_B_IOMUX                                 (IOMUX_PINCM54)
 
 
 /* clang-format on */
