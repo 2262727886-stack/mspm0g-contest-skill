@@ -43,6 +43,53 @@ MSPM0G3507 (天猛星) + K230 (庐山派) 双芯架构 25E 电赛完整参考。
 
 **所有问题请带上实际引脚号**，Skill 会根据拓展板引脚生成直接可用的代码。
 
+## Skill 安装配置
+
+### 方法一：克隆仓库（推荐）
+
+```bash
+# 1. 克隆到用户目录
+git clone https://github.com/2262727886-stack/mspm0g-contest-skill.git
+
+# 2. 复制到 Claude Code 配置目录
+cp -r mspm0g-contest-skill/.claude/skills/mspm0g-contest ~/.claude/skills/
+cp mspm0g-contest-skill/.claude/CLAUDE.md ~/.claude/CLAUDE.md
+```
+
+### 方法二：手动配置
+
+**Step 1 — 创建 Skill 目录**
+
+在用户目录下创建：`.claude/skills/mspm0g-contest/`
+
+```
+~/.claude/
+├── CLAUDE.md                          ← 开发规范 (全局生效)
+└── skills/
+    └── mspm0g-contest/
+        └── SKILL.md                   ← 完整知识库 (15,000+ 行)
+```
+
+**Step 2 — 复制文件**
+
+| 文件 | 目标路径 | 作用 |
+|------|---------|------|
+| `SKILL.md` | `~/.claude/skills/mspm0g-contest/SKILL.md` | 完整电赛开发参考 |
+| `CLAUDE.md` | `~/.claude/CLAUDE.md` | 全局开发规范 (GPIO/Timer/API黑名单) |
+
+**Step 3 — 验证安装**
+
+在 Claude Code 中输入 `/mspm0g-contest`，看到 "MSPM0G 电赛开发助手已加载" 即配置成功。
+
+### Skill 文件说明
+
+| 文件 | 内容 |
+|------|------|
+| `SKILL.md` | 引脚全映射、SysConfig配置、外设驱动模板、控制算法(PID/滤波/卡尔曼)、OLED/MPU6050驱动、K230视觉+CanMV API、25E/24H/23E真题方案、烧录+调试工具链 |
+| `CLAUDE.md` | 强制开发规范：API黑名单、引脚禁用表、硬件型号要求、代码质量标准 |
+
+> 详细使用教程见上方 [Skill 使用教程](#skill-使用教程)
+
 ## 项目结构
 
 ```
