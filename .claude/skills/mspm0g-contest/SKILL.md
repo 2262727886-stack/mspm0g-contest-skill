@@ -31,8 +31,9 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **M0G** | SDK API 验证 (基于 2.10.00.04 例程) | ✅ 已验证 | SDK driverlib/rtos 例程 |
 | **M0G** | TIMG8 TB6612 PWM | 🟡 代码就绪 | 待实机 |
 | **M0G** | TIMA0 舵机 | 🟡 代码就绪 | 待实机 |
-| **M0G** | I2C0 OLED SSD1306 (PA28/PA31) | ✅ 已验证 | 实机点亮,文字显示 |
-| **M0G** | I2C0 MPU6050 (PA28/PA31) | ✅ 已验证 | 实机数据稳定,合力≈1g |
+| **M0G** | I2C 通用驱动 (i2c_write_bytes) | ✅ 已验证 | 传参复用, 支持双总线 |
+| **M0G** | I2C0 OLED SSD1306 (PA28/PA31) | ✅ 已验证 | 5x7 字体, 400kHz |
+| **M0G** | I2C1 MPU6050 (PA10/PA11) | ✅ 已验证 | 独立总线, 400kHz, 数据稳定 |
 | **M0G** | ADC0 8路TCRT5000 | 🟡 代码就绪 | 待实机 |
 | **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 已验证 | 实机烧录成功 |
 | **M0G** | XDS110 SWD 快速烧录脚本 | ✅ 已验证 | DSLite 命令行 ~4.3秒 |
@@ -618,17 +619,20 @@ int main(void) {
 3. 启用中断后 SysConfig 自动生成 IRQHandler 框架
 ```
 
-### 配置步骤：I2C0 (OLED + MPU6050)
+### 配置步骤：I2C 双总线 (OLED + MPU6050)
 
 ```
-1. 点 "ADD" → 搜索 "I2C" → 选 "I2C (Main)"
-2. 配置:
-   Name:          I2C_0
-   SDA Pin:       PA28  ← 官方引脚表 I2C0_SDA
-   SCL Pin:       PA31  ← 官方引脚表 I2C0_SCL
-   Speed:         400 kHz (Fast Mode)
-   Mode:          Controller (主机)
-3. ⚠️ 不需要配内部上拉 (PA28/PA31 已有)
+1. 点 "ADD" → 搜索 "I2C" → 选 "I2C (Main)"，添加两个实例
+2. I2C0 (OLED):
+   Name:          I2C_OLED, Peripheral: I2C0
+   SDA Pin:       PA28, SCL Pin: PA31
+   Speed:         400 kHz, TXFIFO Trigger: BYTES_1
+3. I2C1 (MPU6050):
+   Name:          I2C_MPU, Peripheral: I2C1
+   SDA Pin:       PA10, SCL Pin: PA11
+   Speed:         400 kHz, TXFIFO Trigger: BYTES_1
+4. ⚠️ I2C1 用 PA10/PA11 时需拔掉 CH340 Type-C USB
+5. 板载已有上拉电阻, 不需要配内部上拉
 ```
 
 ### 配置步骤：PWM (电机)
@@ -998,56 +1002,100 @@ void UART0_INST_IRQHandler(void) {
 
 **0.96" OLED (SSD1306 I2C0) 驱动 (✅ 实机验证)：**
 
-> 完整模块化代码见 `workspace_ccstheia/empty_LP_MSPM0G3507_nortos_ticlang/oled.c` 和 `oled.h`
+> 基于通用 `i2c_write_bytes()`，5x7 字体。I2C0 (PA28=SDA, PA31=SCL, 400kHz)
 
 ```c
-// 25E 拓展板: OLED 在 I2C0 (PA28=SDA, PA31=SCL, 地址0x3C)
-// SysConfig: I2C0 → Controller → 100kHz
-#include "oled.h"   // 模块化: oled.h/oled.c 独立文件
+#define OLED_ADDR 0x3C
 
-// 核心 I2C 写函数 (带超时+错误恢复, ✅ 实机验证)
-bool OLED_WR_Byte(uint8_t dat, uint8_t mode) {
-    uint8_t buf[2] = {mode ? 0x40 : 0x00, dat};
-    DL_I2C_flushControllerTXFIFO(I2C_OLED_INST);
-    DL_I2C_fillControllerTXFIFO(I2C_OLED_INST, buf, 2);
-    DL_I2C_startControllerTransfer(I2C_OLED_INST, 0x3C,
-        DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    // 等待完成 + 检查错误
-    uint32_t timeout = 120000;
-    while (DL_I2C_getControllerStatus(I2C_OLED_INST) & DL_I2C_CONTROLLER_STATUS_BUSY) {
-        if (--timeout == 0) {
-            DL_I2C_resetControllerTransfer(I2C_OLED_INST);
-            DL_I2C_flushControllerTXFIFO(I2C_OLED_INST);
-            return false;
-        }
-    }
-    if (DL_I2C_getControllerStatus(I2C_OLED_INST) & DL_I2C_CONTROLLER_STATUS_ERROR)
-        return false;
-    return true;
+/* 写命令 */
+static int oled_cmd(uint8_t cmd) {
+    uint8_t buf[2] = {0x00, cmd};
+    return i2c_write_bytes(OLED_I2C_INST, OLED_ADDR, buf, sizeof(buf));
 }
 
-// 帧缓冲 + 逐页刷新 (防I2C丢字节平移, K230验证模式)
-static uint8_t gram[8][128];
-void OLED_Refresh(void) {
-    for (uint8_t p = 0; p < 8; p++) {
-        OLED_WR_Byte(0xB0 + p, OLED_CMD);
-        OLED_WR_Byte(0x00, OLED_CMD); OLED_WR_Byte(0x10, OLED_CMD);
-        for (uint16_t x = 0; x < 128; x++)
-            OLED_WR_Byte(gram[p][x], OLED_DATA);
+/* 写数据 (分块, 每块≤7字节) */
+static int oled_data(const uint8_t *data, uint8_t len) {
+    uint8_t buf[8];
+    uint8_t offset = 0;
+    while (offset < len) {
+        uint8_t chunk = (uint8_t)(len - offset);
+        if (chunk > 7) chunk = 7;
+        buf[0] = 0x40;
+        for (uint8_t i = 0; i < chunk; i++)
+            buf[i + 1] = data[offset + i];
+        int ret = i2c_write_bytes(OLED_I2C_INST, OLED_ADDR, buf, (uint8_t)(chunk + 1));
+        if (ret != 0) return ret;
+        offset = (uint8_t)(offset + chunk);
+    }
+    return 0;
+}
+
+/* 设置光标位置 */
+static void oled_set_pos(uint8_t page, uint8_t col) {
+    oled_cmd((uint8_t)(0xB0 | (page & 0x07)));
+    oled_cmd((uint8_t)(0x00 | (col & 0x0F)));
+    oled_cmd((uint8_t)(0x10 | (col >> 4)));
+}
+
+/* SSD1306 初始化序列 */
+static void oled_init(void) {
+    uint8_t cmds[] = {
+        0xAE,0xD5,0x80,0xA8,0x3F,0xD3,0x00,0x40,
+        0x8D,0x14,0x20,0x00,0xA1,0xC8,0xDA,0x12,
+        0x81,0xCF,0xD9,0xF1,0xDB,0x40,0xA4,0xA6,0xAF
+    };
+    for (int i = 0; i < sizeof(cmds); i++) oled_cmd(cmds[i]);
+}
+
+/* 5x7 ASCII 字模 (0x30-0x39 数字, 0x41-0x5A 大写) */
+static const uint8_t *font5x7(char c) {
+    static const uint8_t digits[10][5] = {
+        {0x3E,0x51,0x49,0x45,0x3E},{0x00,0x42,0x7F,0x40,0x00},
+        {0x42,0x61,0x51,0x49,0x46},{0x21,0x41,0x45,0x4B,0x31},
+        {0x18,0x14,0x12,0x7F,0x10},{0x27,0x45,0x45,0x45,0x39},
+        {0x3C,0x4A,0x49,0x49,0x30},{0x01,0x71,0x09,0x05,0x03},
+        {0x36,0x49,0x49,0x49,0x36},{0x06,0x49,0x49,0x29,0x1E},
+    };
+    static const uint8_t letters[26][5] = {
+        {0x7E,0x11,0x11,0x11,0x7E},{0x7F,0x49,0x49,0x49,0x36},
+        {0x3E,0x41,0x41,0x41,0x22},{0x7F,0x41,0x41,0x22,0x1C},
+        {0x7F,0x49,0x49,0x49,0x41},{0x7F,0x09,0x09,0x09,0x01},
+        {0x3E,0x41,0x49,0x49,0x7A},{0x7F,0x08,0x08,0x08,0x7F},
+        {0x00,0x41,0x7F,0x41,0x00},{0x20,0x40,0x41,0x3F,0x01},
+        {0x7F,0x08,0x14,0x22,0x41},{0x7F,0x40,0x40,0x40,0x40},
+        {0x7F,0x02,0x0C,0x02,0x7F},{0x7F,0x04,0x08,0x10,0x7F},
+        {0x3E,0x41,0x41,0x41,0x3E},{0x7F,0x09,0x09,0x09,0x06},
+        {0x3E,0x41,0x51,0x21,0x5E},{0x7F,0x09,0x19,0x29,0x46},
+        {0x46,0x49,0x49,0x49,0x31},{0x01,0x01,0x7F,0x01,0x01},
+        {0x3F,0x40,0x40,0x40,0x3F},{0x1F,0x20,0x40,0x20,0x1F},
+        {0x7F,0x20,0x18,0x20,0x7F},{0x63,0x14,0x08,0x14,0x63},
+        {0x07,0x08,0x70,0x08,0x07},{0x61,0x51,0x49,0x45,0x43},
+    };
+    static const uint8_t blank[5] = {0x00,0x00,0x00,0x00,0x00};
+    static const uint8_t colon[5] = {0x00,0x36,0x36,0x00,0x00};
+    static const uint8_t minus[5] = {0x08,0x08,0x08,0x08,0x08};
+    if (c >= '0' && c <= '9') return digits[c - '0'];
+    if (c >= 'A' && c <= 'Z') return letters[c - 'A'];
+    if (c >= 'a' && c <= 'z') return letters[c - 'a'];
+    if (c == ':') return colon;
+    if (c == '-') return minus;
+    return blank;
+}
+
+/* 在指定页/列显示字符串 */
+static void oled_puts(uint8_t page, uint8_t col, const char *s) {
+    oled_set_pos(page, col);
+    while (*s) {
+        uint8_t out[6];
+        const uint8_t *glyph = font5x7(*s++);
+        for (uint8_t i = 0; i < 5; i++) out[i] = glyph[i];
+        out[5] = 0x00;
+        oled_data(out, sizeof(out));
     }
 }
 
-// main.c 中 3 行使用:
-// OLED_Init(); OLED_Clear();
-// OLED_ShowStr(0, 0, "MSPM0G3507", 1); OLED_Refresh();
+// SysConfig: I2C_OLED → I2C0 → SDA: PA28, SCL: PA31, 400kHz, TXFIFO=BYTES_1
 ```
-
-**关键坑:**
-1. `DL_I2C_flushControllerTXFIFO` 写前清空TX FIFO防残留数据
-2. `DL_I2C_resetControllerTransfer` 超时时复位I2C状态机, 防止总线锁死
-3. 逐页刷新 (0xB0+page) 每页128字节, 每页重置列指针, 防数据平移
-4. 等待 IDLE 后再发下一字节, 不同时检查 BUSY (SDK例程模式)
-5. 帧缓冲先写好再整屏刷新, 不实时逐像素写
 
 ### --- SPI ---
 
@@ -1110,13 +1158,51 @@ float hcsr04_get_distance_cm(void) {
 }
 ```
 
-### --- MPU6050 完整驱动 (I2C0, ✅ 实机验证) ---
+### --- I2C 通用驱动 (✅ 实机验证) ---
 
-> **✅ 实测验证**: I2C0 (PA28=SDA, PA31=SCL) + MPU6050, 数据稳定, 合力≈1g
+> 通用 I2C 读写函数，通过 `I2C_Regs *i2c` 参数复用，适用于 I2C0/I2C1。
 
 ```c
-// MPU6050 on I2C0: PA28=SDA, PA31=SCL (可与OLED共存, 地址不同)
-// ⚠️ PA10/PA11 被 CH340 占用, 不能用 I2C1!
+#define I2C_TIMEOUT 100000U
+
+/* 等待总线 IDLE */
+static int i2c_wait_idle(I2C_Regs *i2c) {
+    uint32_t t = I2C_TIMEOUT;
+    while (!(DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_IDLE)) {
+        if (--t == 0) return -1;
+    }
+    return 0;
+}
+
+/* 等待传输完成 (检查 BUSY + ERROR) */
+static int i2c_wait_done(I2C_Regs *i2c) {
+    uint32_t t = I2C_TIMEOUT;
+    while (DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_BUSY) {
+        if (DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_ERROR) return -2;
+        if (--t == 0) return -1;
+    }
+    if (DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_ERROR) return -2;
+    return 0;
+}
+
+/* 通用 I2C 写 (带超时+错误检查) */
+static int i2c_write_bytes(I2C_Regs *i2c, uint8_t addr, const uint8_t *buf, uint8_t len) {
+    if (!buf || !len) return -4;
+    if (i2c_wait_idle(i2c) != 0) return -1;
+    DL_I2C_flushControllerTXFIFO(i2c);
+    DL_I2C_flushControllerRXFIFO(i2c);
+    DL_I2C_fillControllerTXFIFO(i2c, buf, len);
+    DL_I2C_startControllerTransfer(i2c, addr, DL_I2C_CONTROLLER_DIRECTION_TX, len);
+    delay_cycles(16);
+    return i2c_wait_done(i2c);
+}
+```
+
+### --- MPU6050 完整驱动 (I2C1 PA10/PA11, ✅ 实机验证) ---
+
+> **✅ 实测验证**: I2C1 (PA10=SDA, PA11=SCL) 独立总线, 不与OLED冲突
+
+```c
 #define MPU6050_ADDR      0x68
 #define REG_SMPLRT_DIV    0x19
 #define REG_CONFIG        0x1A
@@ -1125,111 +1211,69 @@ float hcsr04_get_distance_cm(void) {
 #define REG_ACCEL_XOUT_H  0x3B
 #define REG_PWR_MGMT_1    0x6B
 #define REG_WHO_AM_I      0x75
-#define I2C_TIMEOUT       100000U
 
-// I2C 等待 IDLE 状态 (防总线冲突)
-static int i2c_wait_idle(void) {
-    uint32_t timeout = I2C_TIMEOUT;
-    while (!(DL_I2C_getControllerStatus(I2C_0_INST) &
-             DL_I2C_CONTROLLER_STATUS_IDLE)) {
-        if (--timeout == 0) return -1;
-    }
-    return 0;
-}
-
-// I2C 等待传输完成 (检查 BUSY + ERROR)
-static int i2c_wait_done(void) {
-    uint32_t timeout = I2C_TIMEOUT;
-    while (DL_I2C_getControllerStatus(I2C_0_INST) &
-           DL_I2C_CONTROLLER_STATUS_BUSY) {
-        if (DL_I2C_getControllerStatus(I2C_0_INST) &
-            DL_I2C_CONTROLLER_STATUS_ERROR) return -2;
-        if (--timeout == 0) return -1;
-    }
-    if (DL_I2C_getControllerStatus(I2C_0_INST) &
-        DL_I2C_CONTROLLER_STATUS_ERROR) return -2;
-    return 0;
-}
-
-// 写寄存器 (带超时+错误检查)
+/* 写寄存器 */
 static int mpu_write_reg(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = {reg, val};
-    if (i2c_wait_idle() != 0) return -1;
-    DL_I2C_flushControllerTXFIFO(I2C_0_INST);
-    DL_I2C_flushControllerRXFIFO(I2C_0_INST);
-    DL_I2C_fillControllerTXFIFO(I2C_0_INST, buf, 2);
-    DL_I2C_startControllerTransfer(I2C_0_INST, MPU6050_ADDR,
-        DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    delay_cycles(16);  // 等硬件稳定
-    return i2c_wait_done();
+    return i2c_write_bytes(MPU_I2C_INST, MPU6050_ADDR, buf, sizeof(buf));
 }
 
-// 读多字节 (逐字节从RX FIFO读, 每字节检查ERROR)
+/* 读多字节 (逐字节从RX FIFO读) */
 static int mpu_read_multi(uint8_t reg, uint8_t *buf, uint8_t len) {
-    if ((buf == 0) || (len == 0)) return -4;
-    if (i2c_wait_idle() != 0) return -1;
-
-    // 发送寄存器地址
-    DL_I2C_flushControllerTXFIFO(I2C_0_INST);
-    DL_I2C_flushControllerRXFIFO(I2C_0_INST);
-    DL_I2C_fillControllerTXFIFO(I2C_0_INST, &reg, 1);
-    DL_I2C_startControllerTransfer(I2C_0_INST, MPU6050_ADDR,
-        DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-    delay_cycles(16);
-    if (i2c_wait_done() != 0) return -2;
-    if (i2c_wait_idle() != 0) return -3;
-
-    // 接收数据
-    DL_I2C_startControllerTransfer(I2C_0_INST, MPU6050_ADDR,
+    if (!buf || !len) return -4;
+    /* 发送寄存器地址 */
+    if (i2c_write_bytes(MPU_I2C_INST, MPU6050_ADDR, &reg, 1) != 0) return -2;
+    if (i2c_wait_idle(MPU_I2C_INST) != 0) return -3;
+    /* 接收数据 */
+    DL_I2C_flushControllerRXFIFO(MPU_I2C_INST);
+    DL_I2C_startControllerTransfer(MPU_I2C_INST, MPU6050_ADDR,
         DL_I2C_CONTROLLER_DIRECTION_RX, len);
     delay_cycles(16);
     for (uint8_t i = 0; i < len; i++) {
-        uint32_t timeout = I2C_TIMEOUT;
-        while (DL_I2C_isControllerRXFIFOEmpty(I2C_0_INST)) {
-            if (DL_I2C_getControllerStatus(I2C_0_INST) &
-                DL_I2C_CONTROLLER_STATUS_ERROR) return -5;
-            if (--timeout == 0) return -6;
+        uint32_t t = I2C_TIMEOUT;
+        while (DL_I2C_isControllerRXFIFOEmpty(MPU_I2C_INST)) {
+            if (DL_I2C_getControllerStatus(MPU_I2C_INST) & DL_I2C_CONTROLLER_STATUS_ERROR)
+                return -5;
+            if (--t == 0) return -6;
         }
-        buf[i] = DL_I2C_receiveControllerData(I2C_0_INST);
+        buf[i] = DL_I2C_receiveControllerData(MPU_I2C_INST);
     }
-    return i2c_wait_done();
+    return i2c_wait_done(MPU_I2C_INST);
 }
 
-// 初始化: 唤醒, ±2000°/s, ±8g, 1kHz
+/* 初始化: 唤醒, ±2000°/s, ±8g, 1kHz */
 static int mpu_init(void) {
-    uint8_t who;
+    uint8_t who = 0;
     if (mpu_write_reg(REG_PWR_MGMT_1, 0x00) != 0) return -1;
     delay_ms(100);
     if (mpu_read_multi(REG_WHO_AM_I, &who, 1) != 0) return -2;
-    if (who != 0x68) return -3;  // MPU6050 应返回 0x68
+    if (who != 0x68) return -3;
     if (mpu_write_reg(REG_SMPLRT_DIV, 0x07) != 0) return -4;
     if (mpu_write_reg(REG_CONFIG, 0x03) != 0) return -5;
-    if (mpu_write_reg(REG_GYRO_CONFIG, 0x18) != 0) return -6;   // ±2000°/s
-    if (mpu_write_reg(REG_ACCEL_CONFIG, 0x10) != 0) return -7;  // ±8g
+    if (mpu_write_reg(REG_GYRO_CONFIG, 0x18) != 0) return -6;
+    if (mpu_write_reg(REG_ACCEL_CONFIG, 0x10) != 0) return -7;
     return 0;
 }
 
-// 读取全部数据 (14字节: ax,ay,az,temp,gx,gy,gz)
-typedef struct {
-    int16_t ax, ay, az;
-    int16_t gx, gy, gz;
-    int16_t temp;
-} MPU6050_Data;
+/* 读取全部数据 (14字节: ax,ay,az,temp,gx,gy,gz) */
+typedef struct { int16_t ax, ay, az, gx, gy, gz, temp; } MPU6050_Data;
 
-void mpu_read_all(MPU6050_Data *data) {
-    uint8_t buf[14];
-    mpu_read_multi(REG_ACCEL_XOUT_H, buf, 14);
-    data->ax   = (int16_t)((buf[0] << 8) | buf[1]);
-    data->ay   = (int16_t)((buf[2] << 8) | buf[3]);
-    data->az   = (int16_t)((buf[4] << 8) | buf[5]);
-    data->temp = (int16_t)((buf[6] << 8) | buf[7]);
-    data->gx   = (int16_t)((buf[8] << 8) | buf[9]);
-    data->gy   = (int16_t)((buf[10] << 8) | buf[11]);
-    data->gz   = (int16_t)((buf[12] << 8) | buf[13]);
+static int mpu_read_all(MPU6050_Data *d) {
+    uint8_t buf[14] = {0};
+    int ret = mpu_read_multi(REG_ACCEL_XOUT_H, buf, sizeof(buf));
+    if (ret != 0) return ret;
+    d->ax   = (int16_t)((buf[0] << 8) | buf[1]);
+    d->ay   = (int16_t)((buf[2] << 8) | buf[3]);
+    d->az   = (int16_t)((buf[4] << 8) | buf[5]);
+    d->temp = (int16_t)((buf[6] << 8) | buf[7]);
+    d->gx   = (int16_t)((buf[8] << 8) | buf[9]);
+    d->gy   = (int16_t)((buf[10] << 8) | buf[11]);
+    d->gz   = (int16_t)((buf[12] << 8) | buf[13]);
+    return 0;
 }
 
-// SysConfig I2C0 配置:
-// ADD → I2C → Name: I2C_0, SDA: PA28, SCL: PA31, 400kHz, Controller
+// SysConfig 配置:
+// I2C_MPU → I2C1 → SDA: PA10, SCL: PA11, 400kHz, TXFIFO=BYTES_1
 ```
 
 // 加速度计 → 角度 (pitch: atan2(-ax, sqrt(ay^2+az^2)), roll: atan2(ay, az))
