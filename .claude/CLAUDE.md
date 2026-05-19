@@ -19,7 +19,7 @@
 | 禁用引脚 | 原因 |
 |----------|------|
 | PA2~PA6 | 时钟引脚，未焊接 |
-| PA10, PA11 | 板载 CH340 固定占用 (UART0 TX/RX) |
+| PA10, PA11 | 板载 CH340 固定占用 (UART0)，可与 MPU6050 I2C1 切换使用 |
 | PA19 | SWDIO 调试数据 |
 | PA20 | SWCLK 调试时钟 |
 
@@ -71,7 +71,8 @@ SDK 版本 `mspm0_sdk_2_10_00_04`，API 必须真实存在。
 |------|-----|
 | MCU | MSPM0G3507 (Cortex-M0+, 80MHz, 128KB/32KB) |
 | 主频 | 32MHz (默认) / 80MHz (需 PLL) |
-| I2C0 OLED | PA28=SDA, PA31=SCL (0x3C) |
+| I2C0 OLED | PA28=SDA, PA31=SCL (0x3C, 400kHz) |
+| I2C1 MPU6050 | PA10=SDA, PA11=SCL (0x68, 400kHz) |
 | 电机 PWM | PB15=TIMG8_C0, PB16=TIMG8_C1 |
 | 编码器A | PA15/PA16 (GPIO双边沿中断) |
 | 编码器B | PA17/TIMG7_CH0, PA24/TIMG7_CH1 |
