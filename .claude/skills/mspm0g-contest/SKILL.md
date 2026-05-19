@@ -406,26 +406,6 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **K230 庐山派** | 5V (Type-C) | 独立电池/充电宝 |
 | **激光笔** | 3.3V | M0G供电, MOS开关 |
 
-### 已禁用的天猛星引脚
-
-| 引脚 | 原因 |
-|------|------|
-| PA2~PA6 | 时钟引脚, 默认未焊接 |
-| PA10, PA11 | 板载CH340固定占用 (UART0 TX/RX) |
-
-### 信号冲突检查
-
-| 总线 | 设备 | 地址/通道 |
-|------|------|----------|
-| I2C0 | MPU6050 + OLED | 0x68 + 0x3C (不同地址, 可共存) |
-| TIMG8 PWM | TB6612 (ch0,ch1) | PB15, PB16 |
-| TIMA0 PWM | 舵机 ×2 (ch0,ch1) | PB8, PB9 |
-| I2C0 | OLED SSD1306 | 0x3C |
-| I2C1 | MPU6050 | 0x68 |
-| ADC | TCRT5000 ×8 | PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7 |
-| TIMG7 编码器 | MG310 电机B | PA17, PA24 |
-| GPIO 中断 | MG310 电机A | PA15, PA16 |
-
 ### 25E 竞赛拓展板引脚分配 (用户实测)
 
 以下引脚表为 25E 竞赛拓展板实际分配，**生成代码时必须使用此表而非默认推荐引脚**。
@@ -561,19 +541,17 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 4. Debug 目录必须存在（SysConfig 生成的 `ti_msp_dl_config.h` 在此）
 5. 新建工程首次编译后，检查 `.vscode/` 是否自动生成；如未生成则手动按此模板创建
 
-### main.c 框架
+### main.c 最小框架
 ```c
 #include "ti_msp_dl_config.h"
 
 int main(void) {
     SYSCFG_DL_init();           // 初始化所有 SysConfig 外设
     __enable_irq();             // 全局中断使能
-
-    while (1) {
-        // 主循环
-    }
+    while (1) {}
 }
 ```
+> 详细框架见下章「外设初始化代码模板」
 
 ---
 
@@ -1330,109 +1308,7 @@ float mahony_get_roll(MahonyAHRS *m) {
 }
 ```
 
-### --- SSD1306 OLED 完整驱动 ---
-
-```c
-#define OLED_ADDR  0x3C
-#define OLED_WIDTH 128
-#define OLED_HEIGHT 64
-#define OLED_PAGES (OLED_HEIGHT / 8)  // 8 pages
-
-static uint8_t oled_framebuffer[OLED_WIDTH * OLED_PAGES];
-
-void oled_write_cmd(uint8_t cmd) {
-    uint8_t buf[2] = {0x00, cmd};
-    DL_I2C_transmitBlocking(I2C0, OLED_ADDR, buf, 2);
-}
-
-void oled_write_data_buf(uint8_t *data, uint16_t len) {
-    // I2C 硬件限制: 一次最多发 128 字节; 批量写入
-    while (len) {
-        uint16_t chunk = (len > 127) ? 127 : len;
-        // 先发 control byte 0x40，再发数据；这里简化用 blocking 逐个 page 刷
-        uint8_t buf[129];
-        buf[0] = 0x40;
-        for (uint16_t i = 0; i < chunk; i++) buf[i+1] = data[i];
-        DL_I2C_transmitBlocking(I2C0, OLED_ADDR, buf, chunk + 1);
-        data += chunk;
-        len  -= chunk;
-    }
-}
-
-void oled_init(void) {
-    // 初始化序列
-    uint8_t init_cmds[] = {
-        0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
-        0x8D, 0x14, 0x20, 0x00, 0xA1, 0xC8, 0xDA, 0x12,
-        0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF
-    };
-    for (int i = 0; i < sizeof(init_cmds); i++) oled_write_cmd(init_cmds[i]);
-    memset(oled_framebuffer, 0, sizeof(oled_framebuffer));
-    oled_refresh();
-}
-
-void oled_refresh(void) {
-    oled_write_cmd(0x21); oled_write_cmd(0x00); oled_write_cmd(0x7F); // 列范围
-    oled_write_cmd(0x22); oled_write_cmd(0x00); oled_write_cmd(0x07); // 页范围
-    oled_write_data_buf(oled_framebuffer, sizeof(oled_framebuffer));
-}
-
-void oled_clear(void) {
-    memset(oled_framebuffer, 0, sizeof(oled_framebuffer));
-}
-
-void oled_draw_pixel(uint8_t x, uint8_t y, uint8_t color) {
-    if (x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
-    if (color) oled_framebuffer[x + (y/8)*OLED_WIDTH] |=  (1 << (y%8));
-    else       oled_framebuffer[x + (y/8)*OLED_WIDTH] &= ~(1 << (y%8));
-}
-
-// Bresenham 画线
-void oled_draw_line(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
-    int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
-    int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-    while (1) {
-        oled_draw_pixel(x0, y0, 1);
-        if (x0 == x1 && y0 == y1) break;
-        int e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x0 += sx; }
-        if (e2 <= dx) { err += dx; y0 += sy; }
-    }
-}
-
-// 6x8 ASCII 字库 (可打印字符 0x20-0x7F, 每字符 6 字节)
-void oled_putchar(uint8_t x, uint8_t y, char c) {
-    if (c < 0x20 || c > 0x7F) return;
-    // 用户需要自行提供 font6x8[c - 0x20][6] 字库
-    extern const uint8_t font6x8[][6];
-    uint8_t idx = c - 0x20;
-    for (uint8_t col = 0; col < 6; col++) {
-        uint8_t data = font6x8[idx][col];
-        for (uint8_t row = 0; row < 8; row++) {
-            oled_draw_pixel(x + col, y + row, (data >> row) & 1);
-        }
-    }
-}
-
-void oled_puts(uint8_t x, uint8_t y, const char *str) {
-    while (*str) {
-        oled_putchar(x, y, *str++);
-        x += 6;
-        if (x > OLED_WIDTH - 6) { x = 0; y += 8; }
-        if (y >= OLED_HEIGHT) return;
-    }
-}
-
-// 显示有符号浮点数（PID 调试常用）
-void oled_show_float(uint8_t x, uint8_t y, const char *label, float val) {
-    char buf[22];
-    snprintf(buf, sizeof(buf), "%s:%.2f", label, val);
-    oled_puts(x, y, buf);
-}
-```
-
-**中文显示方法:** 将汉字取模（16×16 点阵，纵向列行式），每个汉字 32 字节。通过 `oled_draw_pixel` 逐点写入 framebuffer。建议用 PCtoLCD2002 等工具生成字模，然后构建 `const uint8_t hanzi_table[][32]` 数组查表显示。
+> ⚠️ OLED 驱动以 [I2C 章节](#i2c0oled-driver) 的实机验证版本为准，此处不再重复。
 
 ### --- 矩阵按键扫描 (拓展板未使用, 仅供参考) ---
 
@@ -2820,115 +2696,11 @@ if __name__ == '__main__':
 
 
 
----
 
-## 十四、端到端完整工程示例
-
-### 工程配置 (SysConfig)
-
-```
-CCS Project: mspm0g_test
-MCU: MSPM0G3507
-SYSCTL: SYSOSC 32MHz (默认)
-添加外设:
-  ├── UART0:  PA0=TX, PA1=RX, 115200
-  ├── GPIO:   PA7=Output(LED), PA14=Input+PullUp(按键)
-  └── I2C0:   PA28=SDA, PA31=SCL, 400kHz
-```
-
-### main.c (完整可编译)
-
-```c
-/**
- * 天猛星 MSPM0G3507 拓展板测试工程
- * 功能: UART printf + PB27 LED + PA26按键 + I2C0/I2C1 扫描
- * 引脚: PA0/1=UART0, PB27=LED, PA26=K1, PA28/31=I2C0(OLED), PA10/11=I2C1(MPU6050)
- */
-#include "ti_msp_dl_config.h"
-#include <stdio.h>
-
-/* ---- printf 重定向到 UART0 ---- */
-int fputc(int ch, FILE *f) {
-    DL_UART_transmitDataBlocking(UART0, (uint8_t)ch);
-    return ch;
-}
-
-/* ---- SysTick 1ms (时钟=32MHz) ---- */
-volatile uint32_t g_ms_ticks = 0;
-void SysTick_Handler(void) { g_ms_ticks++; }
-void delay_ms(uint32_t ms) {
-    uint32_t start = g_ms_ticks;
-    while ((g_ms_ticks - start) < ms) { __WFI(); }
-}
-
-/* ---- I2C 扫描 ---- */
-void i2c_scan(DL_I2C_TypeDef *i2c) {
-    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-        DL_I2C_fillControllerTXFIFO(i2c, &addr, 1);
-        DL_I2C_startControllerTransfer(i2c, addr, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-        while (DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_BUSY);
-        if (DL_I2C_getControllerStatus(i2c) & DL_I2C_CONTROLLER_STATUS_ADDR_ACK) {
-            printf("0x%02X ", addr);  // 设备存在
-        }
-        // STOP 由 startControllerTransfer 自动生成
-    }
-    printf("\r\n");
-}
-
-/* ---- 主函数 ---- */
-int main(void)
-{
-    SYSCFG_DL_init();
-    SysTick_Config(SystemCoreClock / 1000);  /* 使用实际 MCLK 频率 */
-    __enable_irq();
-
-    printf("\r\n========================================\r\n");
-    printf("  天猛星 MSPM0G3507 拓展板测试\r\n");
-    printf("  UART0: PA0/PA1, LED: PB27, KEY: PA26\r\n");
-    printf("  I2C0(OLED): PA28/PA31, I2C1(MPU6050): PA10/PA11\r\n");
-    printf("  MCLK: %lu Hz\r\n", SystemCoreClock);
-    printf("========================================\r\n\r\n");
-
-    /* I2C 扫描 (I2C0=OLED 0x3C, I2C1=MPU6050 0x68) */
-    printf("I2C0: "); i2c_scan(I2C0);
-    printf("I2C1: "); i2c_scan(I2C1);
-
-    uint32_t led_tick = 0, scan_tick = 0;
-    uint8_t led_state = 0;
-
-    while (1)
-    {
-        /* 500ms LED 闪烁 (PB27) */
-        if (g_ms_ticks - led_tick >= 500) {
-            led_tick = g_ms_ticks;
-            led_state = !led_state;
-            if (led_state) DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_27);
-            else           DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27);
-            printf("[%6lu] LED=%s\r\n", g_ms_ticks, led_state ? "ON" : "OFF");
-        }
-
-        /* 按键检测 (K1=PA26, 按下=低电平) */
-        if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26) == 0) {
-            delay_ms(20);
-            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26) == 0) {
-                printf("[%6lu] K1 PRESSED!\r\n", g_ms_ticks);
-                while (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_26) == 0);
-            }
-        }
-
-        /* 每 5 秒重新扫描 I2C */
-        if (g_ms_ticks - scan_tick >= 5000) {
-            scan_tick = g_ms_ticks;
-            printf("I2C0: "); i2c_scan(I2C0);
-            printf("I2C1: "); i2c_scan(I2C1);
-        }
-    }
-}
-```
 
 ---
 
-## 十五、K230 CanMV API 速查
+## 十四、K230 CanMV API 速查
 
 K230 是嘉楠科技 RISC-V AI 芯片，CanMV 是其 MicroPython 移植。仅软定时器可用，硬件 Timer 0-5 暂不可用。
 
@@ -3390,7 +3162,7 @@ pl.destroy()
 
 ---
 
-## 十六、K230 API 已知问题
+## 十五、K230 API 已知问题
 
 | # | 模块 | 问题 |
 |---|------|------|
@@ -3413,7 +3185,7 @@ pl.destroy()
 
 ---
 
-## 十七、K230 + MSPM0G 双芯方案
+## 十六、K230 + MSPM0G 双芯方案
 
 ### 架构总览
 
@@ -3715,7 +3487,7 @@ vp.loop()
 
 ---
 
-## 十八、电赛真题方案
+## 十七、电赛真题方案
 
 
 
@@ -4795,7 +4567,7 @@ void green_main(void) {
 
 ---
 
-## 十九、硬件连接速查
+## 十八、硬件连接速查
 
 ### 常用模块接线
 
@@ -4852,7 +4624,7 @@ void green_main(void) {
 
 ---
 
-## 二十、工作流程
+## 十九、工作流程
 
 当用户提出需求时，按以下优先级处理：
 
@@ -4862,7 +4634,7 @@ void green_main(void) {
 3. **硬件连接** → 给出引脚对照表 + 注意事项
 4. **问题排查** → 从电气、时序、代码逻辑三个层面诊断
 
-## 二十一、注意事项
+## 二十、注意事项
 
 - MSPM0G 是 3.3V 系统，GPIO 不可直接接 5V（部分引脚可耐受 5V，查看数据手册）
 - **天猛星 PA2~PA6 为时钟引脚，默认未焊接，勿用！** PA10/PA11 被 CH340 固定占用, PA0/PA1 为开漏 BSL 引脚
