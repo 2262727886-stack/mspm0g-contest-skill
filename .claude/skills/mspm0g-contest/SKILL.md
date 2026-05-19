@@ -32,7 +32,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **M0G** | TIMG8 TB6612 PWM | 🟡 代码就绪 | 待实机 |
 | **M0G** | TIMA0 舵机 | 🟡 代码就绪 | 待实机 |
 | **M0G** | I2C0 OLED SSD1306 (PA28/PA31) | ✅ 已验证 | 实机点亮,文字显示 |
-| **M0G** | I2C1 MPU6050 | 🟡 代码就绪 | 待实机 |
+| **M0G** | I2C0 MPU6050 (PA28/PA31) | ✅ 已验证 | 实机数据稳定,合力≈1g |
 | **M0G** | ADC0 8路TCRT5000 | 🟡 代码就绪 | 待实机 |
 | **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 已验证 | 实机烧录成功 |
 | **M0G** | XDS110 SWD 快速烧录脚本 | ✅ 已验证 | DSLite 命令行 ~4.3秒 |
@@ -1132,57 +1132,115 @@ float hcsr04_get_distance_cm(void) {
 }
 ```
 
-### --- MPU6050 完整驱动 (I2C1) ---
+### --- MPU6050 完整驱动 (I2C0, ✅ 实机验证) ---
+
+> **✅ 实测验证**: I2C0 (PA28=SDA, PA31=SCL) + MPU6050, 数据稳定, 合力≈1g
 
 ```c
-// 25E 拓展板: MPU6050 在 I2C1 (PA10=SDA, PA11=SCL), 独立于 OLED 的 I2C0
-#define MPU6050_ADDR  0x68
-#define MPU6050_PWR_MGMT_1   0x6B
-#define MPU6050_ACCEL_XOUT_H 0x3B
-#define MPU6050_GYRO_XOUT_H  0x43
-#define MPU6050_SMPLRT_DIV   0x19
-#define MPU6050_CONFIG       0x1A
-#define MPU6050_GYRO_CONFIG  0x1B
-#define MPU6050_ACCEL_CONFIG 0x1C
+// MPU6050 on I2C0: PA28=SDA, PA31=SCL (可与OLED共存, 地址不同)
+// ⚠️ PA10/PA11 被 CH340 占用, 不能用 I2C1!
+#define MPU6050_ADDR      0x68
+#define REG_SMPLRT_DIV    0x19
+#define REG_CONFIG        0x1A
+#define REG_GYRO_CONFIG   0x1B
+#define REG_ACCEL_CONFIG  0x1C
+#define REG_ACCEL_XOUT_H  0x3B
+#define REG_PWR_MGMT_1    0x6B
+#define REG_WHO_AM_I      0x75
+#define I2C_TIMEOUT       100000U
 
-// I2C1 基础读写
-void mpu6050_write_reg(uint8_t reg, uint8_t val) {
+// I2C 等待 IDLE 状态 (防总线冲突)
+static int i2c_wait_idle(void) {
+    uint32_t timeout = I2C_TIMEOUT;
+    while (!(DL_I2C_getControllerStatus(I2C_0_INST) &
+             DL_I2C_CONTROLLER_STATUS_IDLE)) {
+        if (--timeout == 0) return -1;
+    }
+    return 0;
+}
+
+// I2C 等待传输完成 (检查 BUSY + ERROR)
+static int i2c_wait_done(void) {
+    uint32_t timeout = I2C_TIMEOUT;
+    while (DL_I2C_getControllerStatus(I2C_0_INST) &
+           DL_I2C_CONTROLLER_STATUS_BUSY) {
+        if (DL_I2C_getControllerStatus(I2C_0_INST) &
+            DL_I2C_CONTROLLER_STATUS_ERROR) return -2;
+        if (--timeout == 0) return -1;
+    }
+    if (DL_I2C_getControllerStatus(I2C_0_INST) &
+        DL_I2C_CONTROLLER_STATUS_ERROR) return -2;
+    return 0;
+}
+
+// 写寄存器 (带超时+错误检查)
+static int mpu_write_reg(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = {reg, val};
-    DL_I2C_fillControllerTXFIFO(I2C1, buf, 2);
-    DL_I2C_startControllerTransfer(I2C1, MPU6050_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    while (DL_I2C_getControllerStatus(I2C1) & DL_I2C_CONTROLLER_STATUS_BUSY);
+    if (i2c_wait_idle() != 0) return -1;
+    DL_I2C_flushControllerTXFIFO(I2C_0_INST);
+    DL_I2C_flushControllerRXFIFO(I2C_0_INST);
+    DL_I2C_fillControllerTXFIFO(I2C_0_INST, buf, 2);
+    DL_I2C_startControllerTransfer(I2C_0_INST, MPU6050_ADDR,
+        DL_I2C_CONTROLLER_DIRECTION_TX, 2);
+    delay_cycles(16);  // 等硬件稳定
+    return i2c_wait_done();
 }
 
-uint8_t mpu6050_read_reg(uint8_t reg) {
-    uint8_t val = 0;
-    DL_I2C_fillControllerTXFIFO(I2C1, &reg, 1);
-    DL_I2C_startControllerTransfer(I2C1, MPU6050_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, 1);
-    while (DL_I2C_getControllerStatus(I2C1) & DL_I2C_CONTROLLER_STATUS_BUSY);
-    DL_I2C_startControllerTransfer(I2C1, MPU6050_ADDR, DL_I2C_CONTROLLER_DIRECTION_RX, 1);
-    while (DL_I2C_getControllerStatus(I2C1) & DL_I2C_CONTROLLER_STATUS_BUSY);
-    val = DL_I2C_receiveControllerData(I2C1);
-    return val;
+// 读多字节 (逐字节从RX FIFO读, 每字节检查ERROR)
+static int mpu_read_multi(uint8_t reg, uint8_t *buf, uint8_t len) {
+    if ((buf == 0) || (len == 0)) return -4;
+    if (i2c_wait_idle() != 0) return -1;
+
+    // 发送寄存器地址
+    DL_I2C_flushControllerTXFIFO(I2C_0_INST);
+    DL_I2C_flushControllerRXFIFO(I2C_0_INST);
+    DL_I2C_fillControllerTXFIFO(I2C_0_INST, &reg, 1);
+    DL_I2C_startControllerTransfer(I2C_0_INST, MPU6050_ADDR,
+        DL_I2C_CONTROLLER_DIRECTION_TX, 1);
+    delay_cycles(16);
+    if (i2c_wait_done() != 0) return -2;
+    if (i2c_wait_idle() != 0) return -3;
+
+    // 接收数据
+    DL_I2C_startControllerTransfer(I2C_0_INST, MPU6050_ADDR,
+        DL_I2C_CONTROLLER_DIRECTION_RX, len);
+    delay_cycles(16);
+    for (uint8_t i = 0; i < len; i++) {
+        uint32_t timeout = I2C_TIMEOUT;
+        while (DL_I2C_isControllerRXFIFOEmpty(I2C_0_INST)) {
+            if (DL_I2C_getControllerStatus(I2C_0_INST) &
+                DL_I2C_CONTROLLER_STATUS_ERROR) return -5;
+            if (--timeout == 0) return -6;
+        }
+        buf[i] = DL_I2C_receiveControllerData(I2C_0_INST);
+    }
+    return i2c_wait_done();
 }
 
-// 初始化: 唤醒, ±2000°/s, ±8g, 1kHz 采样
-void mpu6050_init(void) {
-    mpu6050_write_reg(MPU6050_PWR_MGMT_1, 0x00);
+// 初始化: 唤醒, ±2000°/s, ±8g, 1kHz
+static int mpu_init(void) {
+    uint8_t who;
+    if (mpu_write_reg(REG_PWR_MGMT_1, 0x00) != 0) return -1;
     delay_ms(100);
-    mpu6050_write_reg(MPU6050_SMPLRT_DIV, 0x00);
-    mpu6050_write_reg(MPU6050_CONFIG, 0x00);
-    mpu6050_write_reg(MPU6050_GYRO_CONFIG, 0x18);   // ±2000°/s
-    mpu6050_write_reg(MPU6050_ACCEL_CONFIG, 0x10);  // ±8g
+    if (mpu_read_multi(REG_WHO_AM_I, &who, 1) != 0) return -2;
+    if (who != 0x68) return -3;  // MPU6050 应返回 0x68
+    if (mpu_write_reg(REG_SMPLRT_DIV, 0x07) != 0) return -4;
+    if (mpu_write_reg(REG_CONFIG, 0x03) != 0) return -5;
+    if (mpu_write_reg(REG_GYRO_CONFIG, 0x18) != 0) return -6;   // ±2000°/s
+    if (mpu_write_reg(REG_ACCEL_CONFIG, 0x10) != 0) return -7;  // ±8g
+    return 0;
 }
 
+// 读取全部数据 (14字节: ax,ay,az,temp,gx,gy,gz)
 typedef struct {
     int16_t ax, ay, az;
     int16_t gx, gy, gz;
     int16_t temp;
 } MPU6050_Data;
 
-void mpu6050_read_all(MPU6050_Data *data) {
+void mpu_read_all(MPU6050_Data *data) {
     uint8_t buf[14];
-    mpu6050_read_data(MPU6050_ACCEL_XOUT_H, buf, 14);
+    mpu_read_multi(REG_ACCEL_XOUT_H, buf, 14);
     data->ax   = (int16_t)((buf[0] << 8) | buf[1]);
     data->ay   = (int16_t)((buf[2] << 8) | buf[3]);
     data->az   = (int16_t)((buf[4] << 8) | buf[5]);
@@ -1191,6 +1249,10 @@ void mpu6050_read_all(MPU6050_Data *data) {
     data->gy   = (int16_t)((buf[10] << 8) | buf[11]);
     data->gz   = (int16_t)((buf[12] << 8) | buf[13]);
 }
+
+// SysConfig I2C0 配置:
+// ADD → I2C → Name: I2C_0, SDA: PA28, SCL: PA31, 400kHz, Controller
+```
 
 // 加速度计 → 角度 (pitch: atan2(-ax, sqrt(ay^2+az^2)), roll: atan2(ay, az))
 // 注意: 6轴 Mahony 无磁力计修正, yaw 会漂移, 仅 pitch/roll 可靠
