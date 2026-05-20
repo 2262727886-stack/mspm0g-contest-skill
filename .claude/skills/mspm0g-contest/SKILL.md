@@ -25,6 +25,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **K230** | TOUCH(0) 触摸屏 API | ✅ 已验证 | 实机, 坐标=屏幕像素, 多触点 |
 | **K230** | GP7101 I2C→PWM 背光控制 | ✅ 已验证 | I2C3 addr=0x58, 12-bit PWM |
 | **K230** | image.Image 独立画布 | ✅ 已验证 | 800x480, 触摸UI绘制 |
+| **K230** | PWM2 舵机控制 (GPIO46) | ✅ 已验证 | 实机, 07例程模式 |
 | **K230** | 激光光斑检测 | ❌ 未实现 | |
 | **K230** | 画圆轨迹验证 | ❌ 未实现 | |
 | **M0G** | 拓展板引脚分配表 | ✅ 已验证 | SysConfig 外设扫描 |
@@ -2814,9 +2815,11 @@ fpioa = FPIOA()
 fpioa.set_function(pin_number, FPIOA.GPIOx)
 
 # GPIO: 64 个引脚 [0~63], 3.3V电平
+# ⚠️ 所有 GPIO 必须先 fpioa.set_function() 配置，再 Pin()
 pin = Pin(2, Pin.OUT, pull=Pin.PULL_NONE, drive=7)
-pin.value(1); pin.value(0)
-pin.on(); pin.off(); pin.high(); pin.low()
+pin.value(1)   # 高电平 3.3V
+pin.value(0)   # 低电平
+# ⚠️ K230 没有 pin.high()/pin.low()/pin.on()/pin.off(), 只用 value(0/1)
 # drive: 0~15, 默认7, 最大15(除BOOT0/1)
 # Pin.irq() 自 2025年5月固件起支持; 老固件用 GPIO.irq()(仅GPIOHS引脚)
 
@@ -2830,9 +2833,22 @@ adc.read_u16()     # 0~4095
 adc.read_uv()      # 0~1800000 uV
 
 # PWM: 6 通道 [0~5], ch0-2 同频率, ch3-5 同频率
-pwm = PWM(0, freq=1000, duty=50, enable=True)
-pwm.freq(2000); pwm.duty(30)
-pwm.enable(True/False); pwm.deinit()
+# ⚠️ PWM 构造器仅 2 个位置参数, 不支持关键字参数!
+# ⚠️ Display.init 内部占用 PWM0(背光)+PWM1, 舵机请用 PWM2~5
+
+# 正确初始化 (照抄07例程):
+fpioa.set_function(46, FPIOA.PWM2)   # 路由 PWM2 到 GPIO46
+pwm = PWM(2, 50)                     # channel=2, freq=50Hz
+pwm.duty(1.5 / 20 * 100)             # 占空比 0~100% (1.5ms=90°)
+pwm.enable(1)                        # 使能 (1=开, 0=关)
+
+# 舵机角度公式 (50Hz):
+# 0°→0.5ms→duty=2.5%   90°→1.5ms→duty=7.5%   180°→2.5ms→duty=12.5%
+duty = (0.5 + angle * 2.0 / 180) / 20 * 100
+
+# ⚠️ 各 PWM 通道状态:
+# PWM0 = ❌ MIPI屏背光占用   PWM1 = ❌ 被占用
+# PWM2 = ✅ GPIO46验证通过   PWM3~5 = 🟡 理论可用
 ```
 
 ### --- UART / I2C / SPI ---
@@ -3314,6 +3330,12 @@ pl.destroy()
 | 22 | **GP7101 背光** | 庐山派3.1寸MIPI扩展板使用 GP7101(I2C→PWM) + SY7201 升压恒流驱动背光。GP7101 地址 0x58, PWM 寄存器 0x00(频率) 和 0x02(占空比)。与触摸共用 I2C 总线 |
 | 23 | **GC2093 分辨率** | 800x480 非标准分辨率, 可能被 fallback 导致画面不对。**支持**: QVGA(320x240)/VGA(640x480)/HD(1280x720)/FHD(1920x1080) |
 | 24 | **f-string** | MicroPython 不支持 f-string 格式说明符 (如 `f"{x:02X}"`)。**报 SyntaxError**。用 `%` 格式化: `"%02X" % x` |
+| 25 | **PWM 构造器关键字** | `PWM(0, freq=50, duty=7.5, enable=True)` 报 `TypeError: missing 1 required positional arg`。PWM C 层构造器**不支持关键字参数**。**正确**: `PWM(0, 50)` (仅2个位置参数: 通道号, 频率) |
+| 26 | **PWM enable** | `pwm.enable(True/False)` 无效。**正确**: `pwm.enable(1)` 开 / `pwm.enable(0)` 关 |
+| 27 | **PWM 通道占用** | `Display.init(Display.ST7701, ...)` 内部占用 PWM0(背光) 和 PWM1。路由 PWM0/PWM1 到任意 GPIO 均报 `RuntimeError: set pin func failed`。**正确**: 使用 PWM2~5, GPIO46+FPIOA.PWM2 验证通过 |
+| 28 | **Pin 方法不存在** | `pin.high()/low()/on()/off()` 均报 `AttributeError`。K230 只有 `pin.value(1)` / `pin.value(0)` |
+| 29 | **GPIO 也需 FPIOA** | GPIO 输出/输入也必须先 `fpioa.set_function(pin, FPIOA.GPIOxx)` 再 `Pin()`。不能跳过 FPIOA 直接 Pin() |
+| 30 | **伺服软件PWM** | 主循环 `ticks_us` 模拟舵机 PWM 不可用——50fps≈20ms分辨率, 无法产生 500~2500us 级脉宽, 舵机随机抖动。必须用硬件 PWM |
 
 ---
 

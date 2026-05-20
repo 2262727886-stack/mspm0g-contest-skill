@@ -79,6 +79,8 @@ SDK 版本 `mspm0_sdk_2_10_00_04`，API 必须真实存在。
 | 舵机 | PB8=TIMA0_C0, PB9=TIMA0_C1 |
 | CH340调试串口 | PA10=TX, PA11=RX (115200) |
 | K230通信 UART3 | PB2=TX, PB3=RX |
+| K230舵机 PWM | GPIO46=PWM2 (PWM0/1被屏占用), 50Hz |
+| K230 GPIO输出 | 必须FPIOA配置 → Pin(value=1/0), 无high/low |
 | SWD | PA19=SWDIO, PA20=SWCLK |
 | 推荐烧录 | XDS110 (SWD) |
 | 看门狗 | 必须在主循环喂狗，禁止在中断中喂 |
