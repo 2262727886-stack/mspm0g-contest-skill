@@ -21,6 +21,10 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **K230** | OLED SSD1306 I2C0 逐页写入 | ✅ 已验证 | 实机稳定显示 |
 | **K230** | 自动阈值校准+验证回退 | ✅ 已验证 | 实机运行 |
 | **K230** | UART2→M0G 10字节帧发送 | 🟡 代码就绪 | 待实机接线测试 |
+| **K230** | MIPI DSI 显示 ST7701 (800x480) | ✅ 已验证 | 实机, 初始化顺序确认 |
+| **K230** | TOUCH(0) 触摸屏 API | ✅ 已验证 | 实机, 坐标=屏幕像素, 多触点 |
+| **K230** | GP7101 I2C→PWM 背光控制 | ✅ 已验证 | I2C3 addr=0x58, 12-bit PWM |
+| **K230** | image.Image 独立画布 | ✅ 已验证 | 800x480, 触摸UI绘制 |
 | **K230** | 激光光斑检测 | ❌ 未实现 | |
 | **K230** | 画圆轨迹验证 | ❌ 未实现 | |
 | **M0G** | 拓展板引脚分配表 | ✅ 已验证 | SysConfig 外设扫描 |
@@ -2894,16 +2898,86 @@ rtc = RTC()
 rtc.init((2024, 2, 28, 2, 23, 59, 0, 0))
 rtc.datetime()  # → (year, mon, day, wday, hour, min, sec, microsec)
 
-# LCD (SPI 接口)
+# LCD — MIPI DSI 接口 (庐山派 3.1寸屏 ST7701)
+# ⚠️ 这是 MIPI 屏的正确初始化方式, 不是 SPI_LCD!
+from media.display import Display
+
+# 初始化顺序铁律: Sensor → Display.init → MediaManager.init → sensor.run
+sensor = Sensor(width=1920, height=1080)
+sensor.reset()
+sensor.set_framesize(width=640, height=480)    # VGA, GC2093 原生支持
+sensor.set_pixformat(Sensor.RGB565)
+Display.init(Display.ST7701, to_ide=True, width=800, height=480)
+MediaManager.init()
+sensor.run()
+
+# 获取帧缓冲 (方式1: sensor snapshot)
+img = sensor.snapshot(chn=CAM_CHN_ID_0)
+
+# 创建独立画布 (方式2: image.Image, 推荐触摸屏UI用)
+import image
+img = image.Image(800, 480, image.RGB565)  # 画布与屏幕同尺寸
+img.draw_cross(400, 240, color=(255,0,0), size=20)
+Display.show_image(img)
+
+# 自动缩放显示 (参考例程 show_img_2_screen)
+def show_img(img):
+    if img.height() > 480 or img.width() > 800:
+        scale = max(img.height() // 480, img.width() // 800) + 1
+        img.midpoint_pool(scale, scale)
+    img.compress_for_ide()
+    Display.show_image(img, x=(800-img.width())//2, y=(480-img.height())//2)
+
+# SPI LCD (仅用于 SPI 接口的小屏, 如 ST7789)
 from machine import SPI_LCD
-lcd = SPI_LCD(spi, pin_dc, pin_cs, pin_rst, bl=pin_bl, type=SPI_LCD.ST7789)
+lcd = SPI_LCD(spi, dc, cs, rst, bl=bl, type=0)  # type=0=ST7789, 不是 SPI_LCD.ST7789!
 lcd.configure(320, 240, hmirror=False, vflip=True, bgr=False)
-img = lcd.init()               # → Image 对象 (显存)
-img.clear()
-img.draw_string_advanced(0, 0, 32, "你好", color=(255, 0, 0))
-lcd.show()                     # 刷新到屏幕
-lcd.fill(color); lcd.pixel(x, y, color)
-lcd.light(50)                  # 背光 0~100
+img = lcd.init()
+img.draw_string_advanced(0, 0, 32, "Hi", color=(255,0,0))
+lcd.show()
+lcd.light(50)
+```
+
+### --- 触摸屏 (MIPI 屏电容触摸) ---
+
+```python
+from machine import TOUCH
+
+# 初始化 (0 = 触摸索引)
+tp = TOUCH(0)
+
+# 读取触摸点 — 返回屏幕像素坐标 (0~800, 0~480), 与 Display 尺寸对应
+points = tp.read()
+if len(points) > 0:
+    print(points[0].x, points[0].y)  # 直接用于 image.Image(800,480) 画布
+
+# ⚠️ 触摸坐标 = 屏幕坐标, 画布必须与屏幕同尺寸, 否则坐标错位
+# ⚠️ TOUCH(0) 内部封装了 I2C 通信和坐标解析, 不要裸读 I2C 寄存器
+```
+
+### --- GP7101 背光控制 (I2C→PWM, 庐山派3.1寸扩展板) ---
+
+```python
+from machine import I2C
+
+# 庐山派 MIPI 扩展板: GP7101 与触摸共用 FPC4 上的 I2C 总线 (通常 I2C3)
+# 扩展板链路: K230 I2C → GP7101(I2C→PWM) → SY7201(背光驱动 EN/PWM脚)
+# 默认: SY7201 EN 脚被 R7(100kΩ) 上拉 = 背光常亮
+
+GP7101_ADDR = 0x58   # I2C 地址 (0x58/0x59/0x5A/0x5B)
+i2c = I2C(3, freq=400000)  # 总线号可能是 3/1/2/4, 需扫描确认
+
+def gp7101_set(i2c, percent):
+    """背光亮度 0~100% → 12-bit PWM 占空比"""
+    duty = int(max(0, min(100, percent)) * 4095 / 100)
+    # 寄存器 0x02=占空比高字节, 0x03=占空比低字节
+    i2c.writeto(GP7101_ADDR, bytes([0x02, (duty>>8)&0xFF, duty&0xFF]))
+
+# 初始化 PWM 频率: 寄存器 0x00=频率高字节, 0x01=频率低字节
+# PWM频率 = 6MHz / (prescaler × 256), prescaler 范围 1~255
+prescaler = max(1, min(255, 6000000 // (1000 * 256)))  # 目标 1kHz
+i2c.writeto(GP7101_ADDR, bytes([0x00, 0x00, prescaler]))
+gp7101_set(i2c, 80)  # 80% 亮度
 ```
 
 ### ⚠️ 画面分辨率 — 最高优先级
@@ -2931,6 +3005,12 @@ lcd.light(50)                  # 背光 0~100
 4. 主循环首行必须是 `os.exitpoint()`
 5. 抓帧必须是 `sensor.snapshot(chn=CAM_CHN_ID_0)`
 6. 禁止编造不存在的 API (如 `sensor.reset()` 不存在，正确是 `sensor = Sensor(...); sensor.reset()`)
+7. **MIPI 屏用 `Display.init(Display.ST7701)`, 不是 `SPI_LCD`** — SPI_LCD 仅用于 SPI 小屏
+8. 触摸屏用 `from machine import TOUCH; tp = TOUCH(0)`, **不是裸 I2C 读寄存器**
+9. **`image.Image` 画布尺寸必须与屏幕一致** — 触摸坐标是屏幕像素坐标，画布不同则坐标错位
+10. **f-string 慎用** — MicroPython 不支持格式说明符 (如 `f"{x:>3}"`), 用 `%` 格式化
+11. **`SPI_LCD.ST7789` 常量不存在** — 用整数 `type=0` 代替
+12. Sensor 分辨率用标准尺寸 — GC2093 支持 QVGA(320x240)/VGA(640x480)/HD(1280x720), **800x480 不是标准尺寸**
 
 ### ✅ K230 已验证代码模板
 
@@ -3226,6 +3306,14 @@ pl.destroy()
 | 14 | **固件分支** | `canmv_k230`(RTOS纯MicroPython)是唯一维护分支，旧 `k230_canmv`(Linux+RTOS双系统)已停止维护 |
 | 15 | **UART 中断** | UART 等外设硬件中断未暴露给 MicroPython，仅 GPIO 中断可用 |
 | 16 | **OLED I2C0 平移** | OLED 与 GC2093 共享 I2C0 时, 水平寻址模式 (0x21) 丢字节会导致画面左右平移。**解决**: 逐页写入 (0xB0+page), 每页重置列指针。每20帧刷新+500μs延时 |
+| 17 | **SPI_LCD.ST7789** | `type=SPI_LCD.ST7789` 常量不存在, 报 `AttributeError`。**正确**: `type=0` (整数) |
+| 18 | **SPI_LCD 用于 MIPI** | MIPI DSI 屏不能用 SPI_LCD, 报 `not support lcd type`。**正确**: `Display.init(Display.ST7701, ...)` |
+| 19 | **Display 无 Sensor** | 不创建 Sensor 管线直接调 Display.init + image.Image 报 `get display buffer failed`。**Sensor 管线必须存在** |
+| 20 | **Display 初始化顺序** | MediaManager.init 在 Display.init 之前会导致失败。**正确顺序**: Display.init → MediaManager.init → sensor.run |
+| 21 | **FPIOA 重复配置** | `fpioa.set_function()` 每个 GPIO 功能号只能分配给一个物理引脚。`Pin()` 和 `Display.init` 内部自动配 FPIOA，手动再配会冲突报 `set pin func failed` |
+| 22 | **GP7101 背光** | 庐山派3.1寸MIPI扩展板使用 GP7101(I2C→PWM) + SY7201 升压恒流驱动背光。GP7101 地址 0x58, PWM 寄存器 0x00(频率) 和 0x02(占空比)。与触摸共用 I2C 总线 |
+| 23 | **GC2093 分辨率** | 800x480 非标准分辨率, 可能被 fallback 导致画面不对。**支持**: QVGA(320x240)/VGA(640x480)/HD(1280x720)/FHD(1920x1080) |
+| 24 | **f-string** | MicroPython 不支持 f-string 格式说明符 (如 `f"{x:02X}"`)。**报 SyntaxError**。用 `%` 格式化: `"%02X" % x` |
 
 ---
 
