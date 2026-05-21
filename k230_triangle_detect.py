@@ -1,10 +1,11 @@
 """
 K230 三角形识别 — 最小可实现单元
 ================================
-算法: blob颜色 → 原地灰度二值 → 逐blob用 find_rects(roi=...) → 短边筛选
-零 copy: find_rects 自带 roi 参数限定检测区域, 背景不参与, 无额外内存
+参照 LCKFB 官方特征检测例程: find_rects 直接跑在 RGB565 上, 无需灰度/二值化
+算法: find_blobs(颜色区域) → 逐blob find_rects(roi=blob, RGB565直检) → 短边筛选
 
 硬件: 庐山派 K230 + GC2093 + MIPI ST7701
+参考: https://wiki.lckfb.com/zh-hans/lushan-pi-k230/image-recog/img-feature-detect.html
 """
 
 from media.sensor import *
@@ -18,60 +19,53 @@ import image, time, os, gc, math
 
 THRESHOLD = [(20, 100, 15, 127, -20, 80)]
 
+PW, PH = 640, 480          # 摄像头分辨率
+DW, DH = 800, 480          # 显示屏分辨率
+
 # ============================================================
-# 二、三角形检测 (零copy: find_rects roi参数限定区域)
+# 二、三角形检测 (RGB565 直检, 零色彩转换)
 # ============================================================
 
-def find_triangles(img, blob_regions, threshold, min_area=80, edge_ratio=0.25):
+def find_triangles(img, threshold, min_area=500, edge_ratio=0.25):
     """
-    在 img 上原地检测三角形 (img: RGB565 → GRAYSCALE → BINARY).
-    blob_regions: 预检测的 [(x,y,w,h), ...] 颜色区域列表.
-    零 copy: 用 find_rects(roi=blob区域) 限定检测范围.
+    在 RGB565 图像上检测三角形.
+    ⚠️ 不调用 to_grayscale/binary — find_rects 原生支持 RGB565.
     返回 [(cx, cy, x, y, w, h), ...]
     """
-    L_lo = threshold[0][0]
-    L_hi = threshold[0][1]
+    # Step 1: 颜色blob (RGB565)
+    blobs = img.find_blobs(threshold, pixels_threshold=50,
+                           area_threshold=400, merge=True, margin=10)
 
-    if not blob_regions:
-        return []
-
-    # Step 2: 原地灰度 + 二值 (全帧, 0额外内存)
-    img.to_grayscale()
-    img.binary([(L_lo, L_hi)])
-    # img.open(1) — 省略以节省 fast frame buffer stack
-
-    # Step 3: 逐blob区域做几何检测 (用 find_rects 自带 roi, 零copy)
     result = []
-    for (bx, by, bw, bh) in blob_regions[:8]:  # 最多8个blob
+    for b in blobs:
+        bx, by = b.x(), b.y()
+        bw, bh = b.w(), b.h()
+        if bw * bh < min_area:
+            continue
+
+        # Step 2: find_rects 直接在 RGB565 的 blob 区域内检测 (零色彩转换!)
         quads = img.find_rects(roi=(bx, by, bw, bh),
-                               threshold=max(100, bw * bh // 15))
+                               threshold=max(500, bw * bh // 20))
         if not quads:
             continue
 
+        # Step 3: 短边筛选
         for r in quads:
             c = r.corners()
             if len(c) != 4:
                 continue
-
-            # 4边长度
             e = []
             for i in range(4):
                 dx = c[i][0] - c[(i+1)%4][0]
                 dy = c[i][1] - c[(i+1)%4][1]
                 e.append(math.sqrt(dx*dx + dy*dy))
-
             mx, mn = max(e), min(e)
             if mx == 0 or mn/mx >= edge_ratio:
                 continue
-
-            # 重心 (ROI内坐标即全图坐标, find_rects返回绝对坐标)
             cx = sum(p[0] for p in c) // 4
             cy = sum(p[1] for p in c) // 4
-            rx, ry = r.x(), r.y()
-            rw, rh = r.w(), r.h()
-
-            if rw * rh >= min_area:
-                result.append((cx, cy, rx, ry, rw, rh))
+            if r.w() * r.h() >= min_area:
+                result.append((cx, cy, r.x(), r.y(), r.w(), r.h()))
 
     result.sort(key=lambda t: t[5]*t[6], reverse=True)
     return result
@@ -82,21 +76,25 @@ def find_triangles(img, blob_regions, threshold, min_area=80, edge_ratio=0.25):
 # ============================================================
 
 print("=== K230 三角形检测 ===")
-print("算法: blob→灰度二值→find_rects(roi=blob)  零copy")
+print("参照: LCKFB 官方 find_rects RGB565 直检, 零灰度转换")
 
 sensor = Sensor(id=2)
 sensor.reset()
-sensor.set_framesize(width=320, height=240)  # QVGA: to_grayscale不崩溃
-sensor.set_pixformat(Sensor.RGB565)
+sensor.set_framesize(width=PW, height=PH, chn=CAM_CHN_ID_0)
+sensor.set_pixformat(Sensor.RGB565, chn=CAM_CHN_ID_0)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
 
-Display.init(Display.ST7701, width=800, height=480, to_ide=True)
+Display.init(Display.ST7701, width=DW, height=DH, to_ide=True)
 MediaManager.init()
 sensor.run()
 
 clock = time.clock()
 fc = 0
+
+# 显示居中偏移
+ox = (DW - PW) // 2
+oy = (DH - PH) // 2
 
 # ============================================================
 # 四、主循环
@@ -109,40 +107,43 @@ try:
         fc += 1
 
         img = sensor.snapshot(chn=CAM_CHN_ID_0)
+        # img 始终保持 RGB565, 不被修改
 
-        # 一次 find_blobs: 画黄框 + 收集区域 (RGB565状态)
-        blobs = img.find_blobs(THRESHOLD, pixels_threshold=10,
-                               area_threshold=60, merge=True, margin=5)
-        blob_regions = []
+        # --- 找颜色区域 (黄框) ---
+        blobs = img.find_blobs(THRESHOLD, pixels_threshold=50,
+                               area_threshold=400, merge=True, margin=10)
         if blobs:
             for b in blobs:
-                if b.w() * b.h() >= 80:
-                    blob_regions.append((b.x(), b.y(), b.w(), b.h()))
+                if b.w() * b.h() >= 500:
                     img.draw_rectangle(b.x(), b.y(), b.w(), b.h(),
-                                       color=(255, 200, 0), thickness=1)
+                                       color=(255, 200, 0), thickness=2)
 
-        # 三角形检测 (会修改 img 为灰度→二值, 用 roi 参数限定范围)
-        tris = find_triangles(img, blob_regions, THRESHOLD)
+        # --- 三角形检测 (直接在 RGB565 上) ---
+        tris = find_triangles(img, THRESHOLD)
 
-        # 画三角形 (在二值图上用白色画)
+        # --- 画三角形 ---
         for i, (cx, cy, x, y, w, h) in enumerate(tris):
-            c = 255 if i == 0 else 200
-            img.draw_rectangle(x, y, w, h, color=c, thickness=1)
-            img.draw_cross(cx, cy, color=c, size=10)
-            img.draw_string_advanced(cx+12, cy-6, 12, "T%d"%(i+1), color=c)
+            color = (0, 255, 0) if i == 0 else (255, 165, 0)
+            img.draw_rectangle(x, y, w, h, color=color, thickness=3)
+            img.draw_cross(cx, cy, color=(0, 255, 0), size=20)
+            img.draw_string_advanced(cx + 24, cy - 12, 20,
+                                     "T%d" % (i + 1), color=(0, 255, 0))
 
+        # --- 状态 ---
         if tris:
             s = "Tri x%d (%d,%d)" % (len(tris), tris[0][0], tris[0][1])
-            img.draw_string_advanced(4, 4, 14, s, color=255)
+            img.draw_string_advanced(10, 10, 28, s, color=(0, 255, 0))
         else:
-            img.draw_string_advanced(4, 4, 14, "No Triangle", color=200)
+            img.draw_string_advanced(10, 10, 28, "No Triangle",
+                                     color=(255, 100, 100))
 
-        info = "blob:%d FPS:%d" % (len(blob_regions), max(1, clock.fps()))
-        img.draw_string_advanced(4, 20, 12, info, color=160)
+        s2 = "blob:%d FPS:%d" % (len(blobs) if blobs else 0, max(1, clock.fps()))
+        img.draw_string_advanced(10, 44, 20, s2, color=(200, 200, 200))
 
-        Display.show_image(img)
+        # 居中显示
+        Display.show_image(img, x=ox, y=oy)
 
-        if fc % 80 == 0:
+        if fc % 100 == 0:
             gc.collect()
 
 except KeyboardInterrupt:
