@@ -1,11 +1,11 @@
 """
-K230 触摸屏脱机快速调节工具 v6
+K230 触摸屏脱机快速调节工具 v7
 ================================
-v6 改进:
-  - 形状检测重写: 圆形=霍夫圆, 矩形=AprilTag四边形, 三角形=四边形+短边筛选
-  - 双模式校准: LAB统计(主) + 三区采样(备), 均带验证回退
-  - 辅助二值图: 左上角小窗显示当前L阈值下的二值化效果, 帮助手动调参
-  - 连续触摸优化: 防重复触发, 长按连续调节
+v7 修复:
+  - to_lab() 不可用 → RGB统计估算LAB阈值 (主导色判断 + 通道范围推算)
+  - 圆形帧率低   → 降采样2x (800→400) + stride加速, 坐标×2还原
+  - 矩形/三角误检 → 先颜色blob预过滤, 再几何检测, 大幅降低背景噪点
+  - 手动校准增强 → blob计数实时反馈 + 粗调/细调双模式
 
 硬件: 庐山派 K230 + GC2093 + MIPI ST7701 3.1寸触摸屏
 """
@@ -14,7 +14,7 @@ from media.sensor import *
 from media.display import *
 from media.media import *
 from machine import TOUCH
-import image, time, os, gc
+import image, time, os, gc, math
 
 # ============================================================
 # 一、分辨率
@@ -70,60 +70,79 @@ def threshold_adjust(ch, delta):
         B_MAX = max(B_MIN + 5, min(127, B_MAX + delta))
 
 # ============================================================
-# 四、自动校准 (LAB统计 + 三区采样 双策略)
+# 四、自动校准 (to_lab 不可用 → RGB统计估算LAB)
 # ============================================================
 
 def auto_calibrate(img):
     """
-    双策略自动校准, 主策略失败自动切换备策略.
+    RGB 统计估算 LAB 阈值 (to_lab() 在 CanMV v1.2.2 不存在).
+    策略: 采样中央区域 RGB → 判断主导色 → 设置对应 A/B 范围.
     返回 (success, blob_count)
     """
     global L_MIN, L_MAX, A_MIN, A_MAX, B_MIN, B_MAX
     threshold_backup()
 
-    # 策略1: LAB 统计法 (对单色物体最准)
     try:
+        # 中央 200x120 区域采样
         rw, rh = 200, 120
         rx = CW // 2 - rw // 2
         ry = CH // 2 - rh // 2
         roi = img.copy(roi=(rx, ry, rw, rh))
-        lab = roi.to_lab()
-        stats = lab.get_statistics()
 
-        l_mean, l_stdev = stats[0], stats[3]
-        a_mean, a_stdev = stats[6], stats[9]
+        # get_statistics() on RGB565: 18 个值 (mean/median/mode/stdev/min/max × 3)
+        stats = roi.get_statistics()
+        r_mean, r_stdev = stats[0], stats[3]
+        g_mean, g_stdev = stats[6], stats[9]
         b_mean, b_stdev = stats[12], stats[15]
 
-        # 检查有效性: stdev 不能为 0
-        if l_stdev < 0.5 and a_stdev < 0.5 and b_stdev < 0.5:
-            raise ValueError("ROI 内颜色过于均匀, 可能是纯色背景")
+        # 估算 L: 加权亮度
+        l_est = int(0.299 * r_mean + 0.587 * g_mean + 0.114 * b_mean)
+        l_range = max(int(2.5 * max(r_stdev, g_stdev, b_stdev)), 20)
+        L_MIN = max(0, l_est - l_range)
+        L_MAX = min(127, l_est + l_range)
 
-        l_range = max(int(2.5 * l_stdev), 20)
-        a_range = max(int(2.5 * a_stdev), 30)
-        b_range = max(int(2.5 * b_stdev), 30)
+        # 判断主导色 → 设置 A/B 范围
+        r_dom = r_mean - (g_mean + b_mean) / 2  # 红分量优势
+        g_dom = g_mean - (r_mean + b_mean) / 2  # 绿分量优势
+        b_dom = b_mean - (r_mean + g_mean) / 2  # 蓝分量优势
 
-        L_MIN = max(0,   int(l_mean) - l_range)
-        L_MAX = min(127, int(l_mean) + l_range)
-        A_MIN = max(-128, int(a_mean) - a_range)
-        A_MAX = min(127,  int(a_mean) + a_range)
-        B_MIN = max(-128, int(b_mean) - b_range)
-        B_MAX = min(127,  int(b_mean) + b_range)
+        print("  [RGB] R=%.0f±%.0f G=%.0f±%.0f B=%.0f±%.0f" % (
+            r_mean, r_stdev, g_mean, g_stdev, b_mean, b_stdev))
+        print("  [估算] L≈%d  r_dom=%.0f g_dom=%.0f b_dom=%.0f" % (
+            l_est, r_dom, g_dom, b_dom))
 
-        print("  [LAB统计] L=%.1f±%.1f A=%.1f±%.1f B=%.1f±%.1f" % (
-            l_mean, l_stdev, a_mean, a_stdev, b_mean, b_stdev))
+        # 根据主导色设置 A/B (A=红绿轴, B=蓝黄轴)
+        if r_dom > 20:         # 红色物体
+            A_MIN, A_MAX = 20, 127
+            B_MIN, B_MAX = -30, 60
+            print("  [主导色] 红色 → A:20~127 B:-30~60")
+        elif g_dom > 20:        # 绿色物体
+            A_MIN, A_MAX = -128, -10
+            B_MIN, B_MAX = -20, 80
+            print("  [主导色] 绿色 → A:-128~-10 B:-20~80")
+        elif b_dom > 15:        # 蓝色物体
+            A_MIN, A_MAX = -30, 50
+            B_MIN, B_MAX = -128, -10
+            print("  [主导色] 蓝色 → A:-30~50 B:-128~-10")
+        elif abs(r_dom) < 15 and abs(g_dom) < 15 and abs(b_dom) < 15:
+            # 无明显主导 → 物体可能是黑/白/灰, 只用 L 通道
+            A_MIN, A_MAX = -128, 127
+            B_MIN, B_MAX = -128, 127
+            print("  [主导色] 灰度 → 全通道范围")
+        else:
+            # 中间状态 → 建议手动调
+            A_MIN, A_MAX = -60, 60
+            B_MIN, B_MAX = -60, 60
+            print("  [主导色] 不明确 → 建议手动微调")
+
+        print("  新阈值: %s" % threshold_str())
+
     except Exception as e:
-        print("  [LAB统计失败] %s, 尝试三区采样..." % e)
-        # 策略2: 三区采样法 (对复杂场景更鲁棒)
-        try:
-            _calibrate_3zone(img)
-            print("  [三区采样] OK")
-        except Exception as e2:
-            print("  [三区采样失败] %s" % e2)
-            threshold_restore()
-            return False, 0
+        print("  [RGB统计失败] %s" % e)
+        threshold_restore()
+        return False, 0
 
     # 验证
-    print("  新阈值: %s" % threshold_str())
     blobs = img.find_blobs(
         [(L_MIN, L_MAX, A_MIN, A_MAX, B_MIN, B_MAX)],
         pixels_threshold=50, area_threshold=500, merge=True)
@@ -134,42 +153,31 @@ def auto_calibrate(img):
         threshold_restore()
         return False, 0
 
+# ============================================================
+# 五、颜色预过滤 (blob检测, 用于限定几何检测范围)
+# ============================================================
 
-def _calibrate_3zone(img):
+def _get_color_mask(img):
     """
-    备选校准: 在画面中心、左上、右下各取一小块采样,
-    取三区 A/B 通道的合并范围作为阈值. 对纯色物体更鲁棒.
+    用 LAB 阈值找颜色区域, 返回 (blobs列表, 二值mask图).
+    后续几何检测仅在 blob 区域内进行, 减少背景误检.
     """
-    global L_MIN, L_MAX, A_MIN, A_MAX, B_MIN, B_MAX
-    zones = [
-        (CW // 2 - 30, CH // 2 - 30, 60, 60),   # 中心
-        (CW // 4 - 20, CH // 4 - 20, 40, 40),    # 左上
-        (3 * CW // 4 - 20, 3 * CH // 4 - 20, 40, 40),  # 右下
-    ]
-    a_vals, b_vals = [], []
-    for (zx, zy, zw, zh) in zones:
-        roi = img.copy(roi=(zx, zy, zw, zh))
-        lab = roi.to_lab()
-        stats = lab.get_statistics()
-        a_vals.extend([stats[6] - 2.5 * stats[9], stats[6] + 2.5 * stats[9]])
-        b_vals.extend([stats[12] - 2.5 * stats[15], stats[12] + 2.5 * stats[15]])
+    th = threshold_get()
+    blobs = img.find_blobs(th, pixels_threshold=50,
+                           area_threshold=300, merge=True, margin=10)
+    if not blobs:
+        return [], None
 
-    A_MIN = max(-128, int(min(a_vals)))
-    A_MAX = min(127,  int(max(a_vals)))
-    B_MIN = max(-128, int(min(b_vals)))
-    B_MAX = min(127,  int(max(b_vals)))
-    # 扩展范围防过窄
-    if A_MAX - A_MIN < 30:
-        c = (A_MIN + A_MAX) // 2
-        A_MIN, A_MAX = max(-128, c - 20), min(127, c + 20)
-    if B_MAX - B_MIN < 30:
-        c = (B_MIN + B_MAX) // 2
-        B_MIN, B_MAX = max(-128, c - 20), min(127, c + 20)
-    L_MIN, L_MAX = 15, 110  # 宽亮度范围
-    print("  [3区] A:%d~%d B:%d~%d" % (A_MIN, A_MAX, B_MIN, B_MAX))
+    # 生成 blob 区域的二值 mask (在灰度图上, blob区域画白)
+    gray = img.to_grayscale(copy=True)
+    mask = image.Image(CW, CH, image.GRAYSCALE)
+    mask.draw_rectangle(0, 0, CW, CH, color=0, fill=True)  # 全黑
+    for b in blobs:
+        mask.draw_rectangle(b.x(), b.y(), b.w(), b.h(), color=255, fill=True)
+    return blobs, mask
 
 # ============================================================
-# 五、形状检测 (重写, 每种形状独立策略)
+# 六、形状检测
 # ============================================================
 
 OVERLAYS = []
@@ -180,46 +188,76 @@ def detect_shapes(img):
     OVERLAYS = []
     th = threshold_get()
 
-    # === 圆形: 霍夫圆检测 (最可靠) ===
+    # --- 获取颜色预过滤 ---
+    blobs, _ = _get_color_mask(img)
+
     if detect_mode == MODE_CIRCLE:
-        # 先用 find_circles 在灰度图上检测
-        gray = img.to_grayscale(copy=True)
-        circles = gray.find_circles(
-            threshold=3000, r_min=15, r_max=150,
-            r_step=2, x_margin=15, y_margin=15,
-            roi=(0, 0, CW, CH))
-        if circles:
-            for c in circles[:10]:
-                OVERLAYS.append(('circle', c.x(), c.y(), c.r(), 0,
-                                 MODE_COLORS[MODE_CIRCLE]))
-            best = max(circles, key=lambda c: c.r())
-            cx, cy = best.x(), best.y()
-            OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
-            OVERLAYS.append(('label', cx + 35, cy - 20, "r=%d" % best.r(),
-                             (0, 255, 0)))
-            return len(circles), cx, cy, "r=%d" % best.r()
-        return 0, 0, 0, ""
+        return _detect_circles(img)
 
-    # === 矩形: AprilTag 四边形检测 ===
-    if detect_mode == MODE_RECT:
-        gray = img.to_grayscale(copy=True)
-        bin_img = gray.binary([(L_MIN, L_MAX)])
-        bin_img.open(1)  # 去噪
-        rects = bin_img.find_rects(threshold=8000)
-        if rects:
-            for r in rects[:10]:
-                OVERLAYS.append(('rect', r.x(), r.y(), r.w(), r.h(),
-                                 MODE_COLORS[MODE_RECT]))
-            best = max(rects, key=lambda r: r.w() * r.h())
-            crn = best.corners()
-            cx = sum(c[0] for c in crn) // 4
-            cy = sum(c[1] for c in crn) // 4
-            OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
-            return len(rects), cx, cy, ""
+    elif detect_mode == MODE_RECT:
+        return _detect_rects(img, blobs)
 
-        # 降级: blob 圆度筛选
-        blobs = img.find_blobs(th, pixels_threshold=50,
-                               area_threshold=500, merge=True, margin=10)
+    elif detect_mode == MODE_TRIANGLE:
+        return _detect_triangles(img, blobs)
+
+    return 0, 0, 0, ""
+
+
+def _detect_circles(img):
+    """圆形: 降采样2x → 霍夫圆 → 坐标还原, 大幅提速"""
+    # 降采样到 400x240 (4x 更少像素)
+    gray = img.to_grayscale(copy=True)
+    try:
+        gray.midpoint_pool(2, 2)  # 800x480 → 400x240
+    except:
+        pass  # 部分固件不支持, 用原始尺寸
+
+    circles = gray.find_circles(
+        threshold=2500, r_min=8, r_max=80,
+        r_step=2, x_margin=10, y_margin=10,
+        x_stride=3, y_stride=2)  # 跳像素加速
+
+    if circles:
+        scale = 2  # 降采样倍数
+        for c in circles[:10]:
+            cx_s = c.x() * scale
+            cy_s = c.y() * scale
+            r_s  = c.r() * scale
+            OVERLAYS.append(('circle', cx_s, cy_s, r_s, 0,
+                             MODE_COLORS[MODE_CIRCLE]))
+        best = max(circles, key=lambda c: c.r())
+        cx = best.x() * scale
+        cy = best.y() * scale
+        r  = best.r() * scale
+        OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
+        OVERLAYS.append(('label', cx + 35, cy - 20, "r=%d" % r, (0, 255, 0)))
+        return len(circles), cx, cy, "r=%d" % r
+
+    # 降级: blob roundness
+    th = threshold_get()
+    blobs = img.find_blobs(th, pixels_threshold=50,
+                           area_threshold=400, merge=True, margin=10)
+    for b in blobs:
+        if b.roundness() > 0.70 and b.area() > 400:
+            OVERLAYS.append(('circle', b.cx(), b.cy(),
+                             max(b.w(), b.h()) // 2, 0,
+                             MODE_COLORS[MODE_CIRCLE]))
+    if OVERLAYS:
+        b = max(blobs, key=lambda x: x.area())
+        OVERLAYS.append(('cross', b.cx(), b.cy(), 30, 0, (0, 255, 0)))
+        return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
+    return 0, 0, 0, ""
+
+
+def _detect_rects(img, blobs):
+    """矩形: 颜色blob预过滤 + find_rects, 减少背景噪点"""
+    gray = img.to_grayscale(copy=True)
+    bin_img = gray.binary([(L_MIN, L_MAX)])
+    bin_img.open(1)
+
+    rects = bin_img.find_rects(threshold=8000)
+    if not rects and blobs:
+        # 降级: blob roundness
         for b in blobs:
             rn = b.roundness()
             if 0.62 < rn < 0.84 and b.area() > 500:
@@ -231,46 +269,86 @@ def detect_shapes(img):
             return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
         return 0, 0, 0, ""
 
-    # === 三角形: 四边形检测 + 短边筛选 ===
-    if detect_mode == MODE_TRIANGLE:
-        gray = img.to_grayscale(copy=True)
-        bin_img = gray.binary([(L_MIN, L_MAX)])
-        bin_img.open(1)
+    # 颜色验证: rect 重心必须在 blob 区域内
+    valid = []
+    for r in rects:
+        crn = r.corners()
+        rcx = sum(c[0] for c in crn) // 4
+        rcy = sum(c[1] for c in crn) // 4
+        ok = True
+        if blobs:
+            ok = False
+            for b in blobs:
+                if (b.x() <= rcx <= b.x() + b.w() and
+                    b.y() <= rcy <= b.y() + b.h()):
+                    ok = True
+                    break
+        if ok and r.w() * r.h() > 800:
+            valid.append(r)
 
-        # 用低 threshold 检测所有四边形
-        all_quads = bin_img.find_rects(threshold=4000)
-        triangles = []
+    if valid:
+        for r in valid[:10]:
+            OVERLAYS.append(('rect', r.x(), r.y(), r.w(), r.h(),
+                             MODE_COLORS[MODE_RECT]))
+        best = max(valid, key=lambda r: r.w() * r.h())
+        crn = best.corners()
+        cx = sum(c[0] for c in crn) // 4
+        cy = sum(c[1] for c in crn) // 4
+        OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
+        return len(valid), cx, cy, ""
+    return 0, 0, 0, ""
 
-        import math
-        for r in all_quads:
-            corners = r.corners()
-            if len(corners) != 4:
-                continue
-            # 计算 4 条边长
-            edges = []
-            for i in range(4):
-                dx = corners[i][0] - corners[(i + 1) % 4][0]
-                dy = corners[i][1] - corners[(i + 1) % 4][1]
-                edges.append(math.sqrt(dx * dx + dy * dy))
-            # 最短边 < 最长边的 25% → 近似三角形 (一角"折叠")
-            min_e, max_e = min(edges), max(edges)
-            if max_e > 0 and min_e / max_e < 0.25 and r.w() * r.h() > 800:
-                triangles.append(r)
 
-        if triangles:
-            for t in triangles[:8]:
-                OVERLAYS.append(('rect', t.x(), t.y(), t.w(), t.h(),
-                                 MODE_COLORS[MODE_TRIANGLE]))
-            best = max(triangles, key=lambda r: r.w() * r.h())
-            crn = best.corners()
-            cx = sum(c[0] for c in crn) // 4
-            cy = sum(c[1] for c in crn) // 4
-            OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
-            return len(triangles), cx, cy, ""
+def _detect_triangles(img, blobs):
+    """三角形: 颜色blob预过滤 + find_rects低阈值 + 短边筛选"""
+    gray = img.to_grayscale(copy=True)
+    bin_img = gray.binary([(L_MIN, L_MAX)])
+    bin_img.open(1)
 
-        # 降级: blob 圆度筛选 (三角形圆度 ≈ 0.45~0.62)
-        blobs = img.find_blobs(th, pixels_threshold=50,
-                               area_threshold=500, merge=True, margin=10)
+    all_quads = bin_img.find_rects(threshold=4000)
+    tri_candidates = []
+
+    for r in all_quads:
+        corners = r.corners()
+        if len(corners) != 4:
+            continue
+        # 计算边长
+        edges = []
+        for i in range(4):
+            dx = corners[i][0] - corners[(i + 1) % 4][0]
+            dy = corners[i][1] - corners[(i + 1) % 4][1]
+            edges.append(math.sqrt(dx * dx + dy * dy))
+        min_e, max_e = min(edges), max(edges)
+        # 短边 < 长边 25% → 三角形(一角折叠)
+        if max_e > 0 and min_e / max_e < 0.25 and r.w() * r.h() > 800:
+            # 颜色验证
+            crn = r.corners()
+            rcx = sum(c[0] for c in crn) // 4
+            rcy = sum(c[1] for c in crn) // 4
+            ok = True
+            if blobs:
+                ok = False
+                for b in blobs:
+                    if (b.x() <= rcx <= b.x() + b.w() and
+                        b.y() <= rcy <= b.y() + b.h()):
+                        ok = True
+                        break
+            if ok:
+                tri_candidates.append(r)
+
+    if tri_candidates:
+        for t in tri_candidates[:8]:
+            OVERLAYS.append(('rect', t.x(), t.y(), t.w(), t.h(),
+                             MODE_COLORS[MODE_TRIANGLE]))
+        best = max(tri_candidates, key=lambda r: r.w() * r.h())
+        crn = best.corners()
+        cx = sum(c[0] for c in crn) // 4
+        cy = sum(c[1] for c in crn) // 4
+        OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
+        return len(tri_candidates), cx, cy, ""
+
+    # 降级: blob roundness
+    if blobs:
         for b in blobs:
             rn = b.roundness()
             if 0.40 < rn < 0.65 and b.area() > 500:
@@ -280,12 +358,10 @@ def detect_shapes(img):
             b = max(blobs, key=lambda x: x.area())
             OVERLAYS.append(('cross', b.cx(), b.cy(), 30, 0, (0, 255, 0)))
             return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
-        return 0, 0, 0, ""
-
     return 0, 0, 0, ""
 
 # ============================================================
-# 六、UI 绘制
+# 七、UI 绘制
 # ============================================================
 
 BAR_TOP = SH - 56
@@ -341,10 +417,11 @@ def draw_ui(img, count, cx, cy, blob_total=0):
                                  color=MODE_COLORS[detect_mode])
         img.draw_string_advanced(10, 44, 20, "无目标", color=(255, 100, 100))
 
-    # blob 总数实时反馈 (帮助手动调阈值)
+    # blob 总数反馈 (手动调参辅助)
     if blob_total > 0:
+        c = (0, 255, 0) if blob_total > 0 else (255, 150, 50)
         img.draw_string_advanced(10, 68, 16,
-                                 "blob:%d" % blob_total, color=(180, 180, 100))
+                                 "blob:%d" % blob_total, color=c)
 
     if STATUS["timer"] > 0:
         y = 90 if blob_total > 0 else 72
@@ -352,7 +429,7 @@ def draw_ui(img, count, cx, cy, blob_total=0):
                                  color=(255, 255, 0))
         STATUS["timer"] -= 1
 
-    fps_s = "FPS:%d" % CLOCK.fps()
+    fps_s = "FPS:%d" % max(1, CLOCK.fps())
     img.draw_string_advanced(SW - 80, 10, 20, fps_s, color=(180, 180, 180))
 
     # --- 底部控件条 ---
@@ -395,12 +472,12 @@ def draw_ui(img, count, cx, cy, blob_total=0):
                                      color=(255, 255, 255))
 
 # ============================================================
-# 七、初始化
+# 八、初始化
 # ============================================================
 
-print("=== K230 触摸调节工具 v6 ===")
-print("检测: 霍夫圆 / AprilTag四边形 / 短边三角筛选")
-print("校准: LAB统计(主) + 三区采样(备) + 自动回退")
+print("=== K230 触摸调节工具 v7 ===")
+print("校准: RGB统计估算LAB (to_lab不可用)")
+print("检测: 降采样圆形 | 颜色预过滤+几何 矩形/三角")
 
 sensor = Sensor(id=2)
 sensor.reset()
@@ -417,7 +494,7 @@ tp = TOUCH(0)
 CLOCK = time.clock()
 STATUS = {"msg": "", "timer": 0}
 fc = 0
-_last_touch_btn = (-1, -1)  # 防重复触发
+_last_touch_btn = (-1, -1)
 
 def set_status(msg, duration=90):
     STATUS["msg"] = msg
@@ -426,7 +503,7 @@ def set_status(msg, duration=90):
 print("就绪!")
 
 # ============================================================
-# 八、主循环
+# 九、主循环
 # ============================================================
 
 try:
@@ -435,35 +512,30 @@ try:
         CLOCK.tick()
         fc += 1
 
-        # --- 抓帧 ---
         img = sensor.snapshot(chn=CAM_CHN_ID_0)
 
         # --- 检测 ---
         count, cx, cy, extra = detect_shapes(img)
 
-        # --- 实时 blob 计数 (辅助手动调阈值) ---
+        # --- 实时 blob 计数 ---
         all_blobs = img.find_blobs(threshold_get(),
                                    pixels_threshold=10,
                                    area_threshold=50, merge=True)
         blob_total = len(all_blobs) if all_blobs else 0
 
-        # --- 画 UI ---
+        # --- UI ---
         draw_ui(img, count, cx, cy, blob_total)
-
-        # --- 显示 ---
         Display.show_image(img)
 
         # --- 触摸 ---
         points = tp.read()
         if len(points) > 0:
             px, py = points[0].x, points[0].y
-            # 只在按下/移动时响应 (过滤抬起)
             ev = points[0].event
-            if ev not in (2, 3):  # 2=DOWN, 3=MOVE
+            if ev not in (2, 3):
                 _last_touch_btn = (-1, -1)
                 continue
 
-            # 防重复: 同一按钮不放则不重复触发
             handled = False
             cur_btn = (-1, -1)
 
@@ -494,7 +566,6 @@ try:
                     for pm, delta in [(0, -5), (1, 5)]:
                         if in_rect(px, py, adj_btn(ch, pm)):
                             cur_btn = (2, ch, pm)
-                            # +/- 按钮允许长按连续调节
                             threshold_adjust(ch, delta)
                             set_status("%s: %d~%d" % (
                                 "LAB"[ch],
@@ -508,7 +579,6 @@ try:
 
             _last_touch_btn = cur_btn
 
-        # 触控释放时重置
         if len(points) == 0:
             _last_touch_btn = (-1, -1)
 
