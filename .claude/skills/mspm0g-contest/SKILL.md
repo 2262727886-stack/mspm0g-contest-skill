@@ -2827,29 +2827,42 @@ pin.value(0)   # 低电平
 # 板载RGB灯: 共阳, GPIO62=R, GPIO20=G, GPIO63=B (低电平亮)
 # 板载按键: GPIO53, 按下=高电平, 需配置内部下拉
 
-# ⚠️ ADC: 仅 FPC 排线座引出, 4通道, 最高 1.8V 输入!
-# 普通排针上无 ADC 功能, 超1.8V会烧毁芯片
+# ⚠️ ADC: 6通道(板载可用4), 12位分辨率 0~4095, 最高 1.8V 输入!
+# 普通排针上无 ADC, 仅在 FPC 排线座引出. 超 1.8V 永久损坏芯片!
+# ⚠️ read_u16() 名字带 u16 但实际返回 0~4095 (12位), 不是 0~65535!
 adc = ADC(0)
-adc.read_u16()     # 0~4095
-adc.read_uv()      # 0~1800000 uV
+adc.read_u16()     # 原始值 0~4095 (12位)
+adc.read_uv()      # 电压值 0~1800000 uV
 
 # PWM: 6 通道 [0~5], ch0-2 同频率, ch3-5 同频率
 # ⚠️ PWM 构造器仅 2 个位置参数, 不支持关键字参数!
-# ⚠️ Display.init 内部占用 PWM0(背光)+PWM1, 舵机请用 PWM2~5
+# ⚠️ Display.init 内部占用 PWM0(GPIO42=背光)+PWM1(GPIO43=蜂鸣器), 舵机请用 PWM2~5
+
+# 庐山派 40Pin 排针可用 PWM 引脚:
+
+| 排针引脚 | 芯片引脚 | PWM通道 | 备注 |
+|---------|---------|--------|------|
+| 12 | GPIO47 | PWM3 | ✅ 可用 |
+| 26 | GPIO61 | PWM1 | ⚠️ 与板载蜂鸣器互斥 |
+| 32 | GPIO46 | PWM2 | ✅ 已验证(舵机) |
+| 33 | GPIO52 | PWM4 | ✅ 可用 |
+| 35 | GPIO42 | PWM0 | ❌ MIPI屏背光占用 |
 
 # 正确初始化 (照抄07例程):
 fpioa.set_function(46, FPIOA.PWM2)   # 路由 PWM2 到 GPIO46
 pwm = PWM(2, 50)                     # channel=2, freq=50Hz
 pwm.duty(1.5 / 20 * 100)             # 占空比 0~100% (1.5ms=90°)
 pwm.enable(1)                        # 使能 (1=开, 0=关)
+# 也可用 pwm.duty_u16() 0~65535 更高精度, 但 MicroPython 可能未实现
 
 # 舵机角度公式 (50Hz):
 # 0°→0.5ms→duty=2.5%   90°→1.5ms→duty=7.5%   180°→2.5ms→duty=12.5%
 duty = (0.5 + angle * 2.0 / 180) / 20 * 100
 
 # ⚠️ 各 PWM 通道状态:
-# PWM0 = ❌ MIPI屏背光占用   PWM1 = ❌ 被占用
-# PWM2 = ✅ GPIO46验证通过   PWM3~5 = 🟡 理论可用
+# PWM0 = ❌ MIPI屏背光占用(GPIO42)   PWM1 = ⚠️ 板载蜂鸣器(GPIO43)
+# PWM2 = ✅ GPIO46验证通过(舵机)     PWM3~5 = ✅ 可用
+# 无源蜂鸣器 PWM1(GPIO43) 与排针26互斥
 ```
 
 ### --- UART / I2C / SPI ---
@@ -2857,8 +2870,13 @@ duty = (0.5 + angle * 2.0 / 180) / 20 * 100
 ```python
 from machine import UART, I2C, I2C_Slave, SPI
 
-# UART: UART2(GPIO11=TXD,GPIO12=RXD) 和 UART3(GPIO50=TXD,GPIO51=RXD) 可用
-# UART0(GPIO38/39) 被大核RT-Smart占用, UART1不可用
+# UART: K230 共 5 个 UART 模块
+# UART0(GPIO38/39) = 小核 RT-Smart 占用 ❌
+# UART3(GPIO50/51) = 大核 RT-Smart 占用 ❌
+# UART1(GPIO5/6), UART2(GPIO11/12), UART4(GPIO14/15) = 用户可用 ✅
+# ⚠️ 所有 UART 使用前必须 FPIOA 配置!
+fpioa.set_function(11, FPIOA.UART2_TXD)
+fpioa.set_function(12, FPIOA.UART2_RXD)
 u = UART(UART.UART2, baudrate=115200, bits=UART.EIGHTBITS,
          parity=UART.PARITY_NONE, stop=UART.STOPBITS_ONE)
 u.write(buf); u.read([n]); u.readline(); u.readinto(buf)
@@ -2960,16 +2978,24 @@ lcd.light(50)
 ```python
 from machine import TOUCH
 
-# 初始化 (0 = 触摸索引)
+# 初始化 (0 = 触摸设备索引)
 tp = TOUCH(0)
+# tp = TOUCH(0, rotation)  # rotation: 0/1/2/3 坐标旋转
 
-# 读取触摸点 — 返回屏幕像素坐标 (0~800, 0~480), 与 Display 尺寸对应
+# 读取触摸点 — 返回 TOUCH_INFO 对象列表
 points = tp.read()
 if len(points) > 0:
-    print(points[0].x, points[0].y)  # 直接用于 image.Image(800,480) 画布
+    p = points[0]
+    print(p.x, p.y)           # 屏幕像素坐标 (0~800, 0~480)
+    print(p.event)            # 事件码: 0=NONE 1=UP 2=DOWN 3=MOVE
+    print(p.track_id)         # 触点ID (多点触控)
+    print(p.width)            # 触点宽度
+    print(p.timestamp)        # 时间戳
 
-# ⚠️ 触摸坐标 = 屏幕坐标, 画布必须与屏幕同尺寸, 否则坐标错位
-# ⚠️ TOUCH(0) 内部封装了 I2C 通信和坐标解析, 不要裸读 I2C 寄存器
+# ⚠️ 触摸坐标 = 屏幕像素坐标, 画布必须与屏幕同尺寸
+# ⚠️ 支持多点触控, tp.read() 返回所有触点的 TOUCH_INFO 列表
+# ⚠️ TOUCH(0) 内部封装 I2C 通信和坐标解析, 不要裸读 I2C 寄存器
+# ⚠️ 事件码: 按下=DOWN(2) 移动=MOVE(3) 抬起=UP(1)
 ```
 
 ### --- GP7101 背光控制 (I2C→PWM, 庐山派3.1寸扩展板) ---
@@ -2995,6 +3021,120 @@ def gp7101_set(i2c, percent):
 prescaler = max(1, min(255, 6000000 // (1000 * 256)))  # 目标 1kHz
 i2c.writeto(GP7101_ADDR, bytes([0x00, 0x00, prescaler]))
 gp7101_set(i2c, 80)  # 80% 亮度
+```
+
+### --- Image 图像处理 API (重点) ---
+
+**图像预处理：**
+
+```python
+import image
+
+# 格式转换
+img.to_grayscale()          # → GRAYSCALE
+img.to_rgb565()             # → RGB565
+img.to_lab()                # → LAB 色彩空间 (用于阈值分析)
+img.copy(roi=(x,y,w,h))     # 裁剪 ROI
+img.resize(w, h)            # 缩放 (可能不可用, 见已知问题)
+
+# 二值化 (仅 GRAYSCALE)
+img.binary([(lo, hi)], invert=False)
+# lo/hi: 灰度阈值 0~255, 范围内变白
+# invert=True 翻转
+
+# 直方图
+hist = img.get_histogram()
+hist.get_threshold()        # → threshold 对象, .value() 取数值
+hist.mean()                 # 平均亮度
+hist.median()               # 中位数
+img.histeq()                # 自适应直方图均衡化
+
+# 边缘检测 (仅 GRAYSCALE)
+img.find_edges(image.EDGE_CANNY, threshold=(lo, hi))
+img.find_edges(image.EDGE_SIMPLE, threshold=(lo, hi))
+img.find_edges(image.EDGE_SOBEL)
+
+# 平滑滤波
+img.gaussian(size)          # 高斯模糊 (慎用, 极慢)
+img.median(size)            # 中值滤波
+img.mean(size)              # 均值滤波
+img.gamma(gamma, contrast, brightness)  # Gamma 校正
+
+# 统计
+stats = img.get_statistics()
+# RGB565: (r_mean, r_median, r_mode, r_stdev, r_min, r_max,
+#           g_mean, ..., b_mean, ...)
+# LAB:    (l_mean, l_median, l_mode, l_stdev, l_min, l_max,
+#           a_mean, ..., b_mean, ...)
+# GRAY:   (mean, median, mode, stdev, min, max)
+```
+
+**颜色识别 — find_blobs() (LAB 色彩空间)：**
+
+```python
+blobs = img.find_blobs(
+    thresholds=[(L_min, L_max, A_min, A_max, B_min, B_max)],
+    invert=False,           # True=反相
+    roi=(x, y, w, h),       # 感兴趣区域
+    x_stride=2,             # X方向跳像素 (加速)
+    y_stride=1,             # Y方向跳像素
+    area_threshold=10,      # 最小边界框面积
+    pixels_threshold=10,    # 最小像素数
+    merge=True,             # 合并相邻色块
+    margin=5                # 合并边距
+)
+
+# blob 对象属性:
+# b.cx(), b.cy()         — 中心坐标
+# b.x(), b.y(), b.w(), b.h() — 外接矩形
+# b.area()               — 面积 (像素数)
+# b.roundness()          — 圆度 0~1 (1=正圆)
+# b.rotation()           — 旋转角度 (弧度)
+# b.code()               — 色块编号 (1/2/4/8 对应阈值列表索引)
+
+# 常用 LAB 阈值参考 (现场必须校准!):
+# 红色:  (30, 100,  15, 127,  15, 127)
+# 绿色:  (30, 100, -64,  -8,  50,  70)
+# 蓝色:  ( 0,  40,   0,  90,-128, -20)
+```
+
+**特征检测：**
+
+```python
+# 矩形检测 — AprilTag 四边形算法
+rects = img.find_rects(roi=None, threshold=10000)
+# threshold: 越低检出越多 (推荐 4000~15000)
+# rect.corners() → [(x0,y0),(x1,y1),(x2,y2),(x3,y3)] 顺时针从左上
+# rect.rect()   → (x, y, w, h)
+
+# 圆形检测 — 霍夫变换
+circles = img.find_circles(
+    roi=None, x_stride=2, y_stride=1,
+    threshold=2000,         # 仅返回>=此值的大圆
+    x_margin=10, y_margin=10, r_margin=10  # 合并相近圆
+)
+# circle.x(), circle.y(), circle.r()
+# circle.magnitude()  — 边缘梯度幅值
+
+# 线段检测 — LSD 算法
+lines = img.find_line_segments(
+    roi=None, merge_distance=0, max_theta_difference=15
+)
+# line.x1(), line.y1(), line.x2(), line.y2()
+# line.length(), line.theta()
+```
+
+**绘图：**
+
+```python
+img.draw_line(x1, y1, x2, y2, color, thickness)
+img.draw_rectangle(x, y, w, h, color, thickness, fill=False)
+img.draw_circle(x, y, r, color, thickness, fill=False)
+img.draw_cross(x, y, size, color, thickness)
+img.draw_arrow(x1, y1, x2, y2, color, size, thickness)
+img.draw_string(x, y, text, color, scale)
+img.draw_string_advanced(x, y, size, text, color)
+# ⚠️ 仅支持 RGB565 / GRAYSCALE / ARGB8888 格式
 ```
 
 ### ⚠️ 画面分辨率 — 最高优先级
