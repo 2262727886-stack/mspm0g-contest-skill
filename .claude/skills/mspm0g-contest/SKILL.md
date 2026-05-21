@@ -2493,11 +2493,12 @@ echo "FLASH"
 **Windows 批处理版 (fast_flash.bat)：**
 ```bat
 @echo off
-set PROJ=C:\Users\Administrator\workspace_ccstheia\test_1
-set CC=C:\ti\ccs2020\ccs\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\bin\tiarmclang.exe
-set DSLITE=C:\ti\uniflash_9.5.0\deskdb\content\TICloudAgent\win\ccs_base\DebugServer\bin\DSLite.exe
-set CCXML=C:\ti\uniflash_9.5.0\deskdb\content\TICloudAgent\win\scripting\examples\debugger\mspm0g3507\mspm0g3507.ccxml
-set SDK=C:\ti\mspm0_sdk_2_10_00_04\source
+rem ===== 用户配置区 (按实际安装路径修改) =====
+set PROJ=<你的CCS工程目录路径>
+set CC=<CCS安装目录>\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\bin\tiarmclang.exe
+set DSLITE=<UniFlash安装目录>\deskdb\content\TICloudAgent\win\ccs_base\DebugServer\bin\DSLite.exe
+set CCXML=<UniFlash安装目录>\deskdb\content\TICloudAgent\win\scripting\examples\debugger\mspm0g3507\mspm0g3507.ccxml
+set SDK=<MSPM0 SDK安装目录>\source
 
 cd /d "%PROJ%\Debug"
 
@@ -3016,97 +3017,98 @@ gp7101_set(i2c, 80)  # 80% 亮度
 
 **生成任何 K230 代码前，必须先对照下方「已验证模板」逐行检查：**
 1. 导入必须是 `from media.sensor import *` 等星号导入，禁止 `import sensor`
-2. Sensor 构造不传 `id` 参数
-3. 初始化顺序严格: set_framesize → set_pixformat → Display.init → MediaManager.init → sensor.run
+2. **庐山派 GC2093 用 `Sensor(id=2)`** (CSI 2 接口) — 旧版 `Sensor(width=1920, height=1080)` 在 IDE VIRT 模式可用, 物理屏推荐 `Sensor(id=2)`
+3. 初始化顺序:
+   - **无 bind_layer 模式**: set_framesize → set_pixformat → Display.init → MediaManager.init → sensor.run
+   - **有 bind_layer 模式**: set_framesize → set_pixformat → bind_layer → Display.init → MediaManager.init → sensor.run
 4. 主循环首行必须是 `os.exitpoint()`
 5. 抓帧必须是 `sensor.snapshot(chn=CAM_CHN_ID_0)`
 6. 禁止编造不存在的 API (如 `sensor.reset()` 不存在，正确是 `sensor = Sensor(...); sensor.reset()`)
-7. **MIPI 屏用 `Display.init(Display.ST7701)`, 不是 `SPI_LCD`** — SPI_LCD 仅用于 SPI 小屏
+7. **MIPI 屏用 `Display.init(Display.ST7701, width=800, height=480, to_ide=True)`**, 不是 `SPI_LCD` — SPI_LCD 仅用于 SPI 小屏
 8. 触摸屏用 `from machine import TOUCH; tp = TOUCH(0)`, **不是裸 I2C 读寄存器**
 9. **`image.Image` 画布尺寸必须与屏幕一致** — 触摸坐标是屏幕像素坐标，画布不同则坐标错位
 10. **f-string 慎用** — MicroPython 不支持格式说明符 (如 `f"{x:>3}"`), 用 `%` 格式化
 11. **`SPI_LCD.ST7789` 常量不存在** — 用整数 `type=0` 代替
-12. Sensor 分辨率用标准尺寸 — GC2093 支持 QVGA(320x240)/VGA(640x480)/HD(1280x720), **800x480 不是标准尺寸**
+12. **GC2093 分辨率**: QVGA(320x240)/VGA(640x480)/HD(1280x720). **800x480 在 LCKFB 固件上实测可用**(匹配 ST7701 LCD 同尺寸, 零缩放)
+13. **层常量**: `Display.LAYER_VIDEO1`/`Display.LAYER_OSD0` 不是裸 `LAYER_VIDEO1`/`LAYER_OSD0`
 
 ### ✅ K230 已验证代码模板
 
-以下模板在 GC2093 + QVGA + A4黑框+红色靶心场景下**实测通过**。**所有后续 K230 代码必须以此模板为蓝本扩展。**
+以下模板在 GC2093 + MIPI ST7701 触摸屏场景下**实测通过**。**所有后续 K230 代码必须以此模板为蓝本扩展。**
+
+#### 模板 A: MIPI ST7701 物理屏 (脱机运行, 触摸UI)
 
 ```python
 """
-K230 代码模板 (已验证) — GC2093 QVGA A4黑框+红色靶心
-所有 K230 代码必须基于此模板, 禁止 AI 幻觉生成
+K230 MIPI 触摸屏模板 (已验证) — 800x480 全屏显示 + 检测 + 触摸UI
+适用: 庐山派 + GC2093 + ST7701 3.1寸触摸屏, 脱机运行
+关键: 摄像头分辨率=屏幕分辨率(800x480), 零缩放, Display.show_image 直出
+"""
+from media.sensor import *
+from media.display import *
+from media.media import *
+import image, time, os, gc
+
+SW, SH = 800, 480  # 屏幕=摄像头分辨率, 零缩放
+
+sensor = Sensor(id=2)                          # 庐山派 CSI 2
+sensor.reset()
+sensor.set_framesize(width=SW, height=SH)      # 800x480 = LCD 同尺寸
+sensor.set_pixformat(Sensor.RGB565)
+sensor.set_hmirror(False)
+sensor.set_vflip(False)
+
+Display.init(Display.ST7701, width=SW, height=SH, to_ide=True)
+MediaManager.init()
+sensor.run()
+
+clock = time.clock(); fc = 0
+
+while True:
+    os.exitpoint()
+    clock.tick(); fc += 1
+
+    img = sensor.snapshot(chn=CAM_CHN_ID_0)  # 800x480 图像
+
+    # --- 检测 + UI 绘制 (直接画在 img 上) ---
+    # img.draw_rectangle(...) / img.draw_cross(...) / img.draw_string_advanced(...)
+
+    Display.show_image(img)  # 800x480 → 800x480, 零缩放
+
+    if fc % 200 == 0:
+        gc.collect()
+```
+
+#### 模板 B: IDE VIRT 虚拟屏 (调试开发)
+
+```python
+"""
+K230 IDE 调试模板 — GC2093 QVGA 采集 + IDE 虚拟显示
+适用: CanMV IDE 联机调试, 不需要物理屏
 """
 from media.sensor import *
 from media.display import *
 from media.media import *
 import time, os, gc
 
-# ===== 一、初始化 (顺序不可变) =====
-sensor = Sensor(width=1920, height=1080)     # 不传 id
+sensor = Sensor(width=1920, height=1080)       # IDE调试用此构造
 sensor.reset()
-sensor.set_framesize(width=320, height=240)   # 先尺寸(QVGA高帧率)
-sensor.set_pixformat(Sensor.RGB565)            # 后格式
+sensor.set_framesize(width=320, height=240)     # QVGA高帧率
+sensor.set_pixformat(Sensor.RGB565)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
 Display.init(Display.VIRT, width=640, height=480, to_ide=True)
 MediaManager.init()
 sensor.run()
 
-# ===== 二、阈值 (现场 IDE 阈值编辑器校准) =====
-TAPE_GRAY  = (0, 109)
-RED_TARGET = [(52,100,24,127,-49,41), (29,73,19,127,-57,89)]
-
-# ===== 三、检测变量 =====
-a4_corners = None; a4_ok = False; a4_stable = 0; a4_last = None
-target_ok = False; target_cx = 0; target_cy = 0
 clock = time.clock(); fc = 0
-IW, IH = 320, 240
-
-print("启动...")
-
-# ===== 四、过滤函数 =====
-def a4_filter_valid(rects):
-    good = []
-    for r in rects:
-        w, h = r.w(), r.h()
-        if w <= 0 or h <= 0: continue
-        ratio = max(w, h) / min(w, h)
-        area = w * h
-        if 1.15 < ratio < 1.80 and IW*IH*0.03 < area < IW*IH*0.85:
-            good.append(r)
-    return good
-
-def corners_near(c1, c2, d=15):
-    if c1 is None or c2 is None: return False
-    for p, q in zip(c1, c2):
-        if abs(p[0]-q[0]) > d or abs(p[1]-q[1]) > d: return False
-    return True
-
-# ===== 五、主循环 =====
-try:
-    while True:
-        os.exitpoint()  # 必须! IDE中断
-        clock.tick(); fc += 1
-        img = sensor.snapshot(chn=CAM_CHN_ID_0)
-
-        # --- A4检测 ---
-        gray = img.to_grayscale(copy=True)
-        bin_img = gray.binary([TAPE_GRAY])
-        bin_img.open(1)
-        rects = a4_filter_valid(bin_img.find_rects(threshold=10000))
-        if rects: ...
-        # (业务逻辑在此扩展)
-
-        Display.show_image(img)
-        if fc % 300 == 0: gc.collect()
-
-except KeyboardInterrupt: print("stop")
-except BaseException as e: print(f"err: {e}")
-finally:
-    sensor.stop(); Display.deinit()
-    os.exitpoint(os.EXITPOINT_ENABLE_SLEEP); time.sleep_ms(100)
-    MediaManager.deinit()
+while True:
+    os.exitpoint()
+    clock.tick(); fc += 1
+    img = sensor.snapshot(chn=CAM_CHN_ID_0)
+    # 检测/绘制...
+    Display.show_image(img)
+    if fc % 300 == 0: gc.collect()
 ```
 
 ### ✅ K230 OLED SSD1306 已验证驱动
@@ -3243,24 +3245,47 @@ MediaManager.deinit()
 # 支持传感器: OV5647(2592×1944@10fps), GC2093(1920×1080@60fps), IMX335
 # 像素格式: RGB565, RGB888, YUV420SP, GRAYSCALE
 # 关键坑:
-# 1. 不要传 id=0 参数给 Sensor(), 否则 "Can not found sensor on 0"
+# 1. 庐山派 GC2093 在 CSI 2, 用 Sensor(id=2). Sensor(width=1920,height=1080) 仅 IDE VIRT 模式
 # 2. 必须 from media.sensor import * 而非 import Sensor, 否则 CAM_CHN_ID_0 未定义
 # 3. set_framesize 必须在 set_pixformat 之前
-# 4. 初始化顺序: Display.init → MediaManager.init → sensor.run (不可变)
+# 4. MIPI屏直出模式: set_framesize(800,480) 匹配 LCD 尺寸, 零缩放
 # 5. 主循环中必须调用 os.exitpoint() 否则 IDE 无法 Ctrl+C 停止
-# 6. 默认 320×240 高帧率, 不要无谓升分辨率!
+# 6. 双通道(CH0+CH1)在 GC2093 上可能不可用, 单通道足够
 ```
 
 ### --- Display ---
 
+**MIPI ST7701 物理屏架构 (二选一):**
+
 ```python
 from media.display import Display
 
+# ===== 方案 A: 直出模式 (推荐, 最简可靠) =====
+# 摄像头分辨率 = 屏幕分辨率, 零缩放, 无需 bind_layer
+# Display.init 必须在 MediaManager.init 之前
+Display.init(Display.ST7701, width=800, height=480, to_ide=True)
+MediaManager.init()
+# 主循环中: img = sensor.snapshot(); Display.show_image(img)
+
+# ===== 方案 B: bind_layer 模式 (硬件DMA, 适合视频流) =====
+# ⚠️ bind_info() 返回 dict, 必须 ** 拆包
+# ⚠️ 层常量是 Display.LAYER_VIDEO1 (不是裸 LAYER_VIDEO1)
+# ⚠️ bind_layer 必须在 Display.init 之前
+bind_info = sensor.bind_info(chn=CAM_CHN_ID_0)
+# bind_info 返回: {'src':(mod,dev,layer), 'rect':(x,y,w,h), 'pix_format':...}
+Display.bind_layer(**bind_info, layer=Display.LAYER_VIDEO1)
+Display.init(Display.ST7701, width=800, height=480, to_ide=True)
+MediaManager.init()
+sensor.run()
+# VIDEO1 层摄像头硬件直显, 主循环中可 OSD 叠加:
+# osd = image.Image(800, 480, image.RGB565)
+# Display.show_image(osd, layer=Display.LAYER_OSD0)
+
 # 支持的屏幕: ST7701(800×480), LT9611 HDMI(1920×1080), HX8377(1080×1920), VIRT(IDE调试)
-# VIRT: 虚拟显示, 图像回传 CanMV IDE
-Display.init(Display.VIRT, width=640, height=480, to_ide=True)
-Display.show_image(img, x=0, y=0, layer=LAYER_OSD0)
-Display.bind_layer(src=sensor.bind_info(), dstlayer=LAYER_VIDEO1)
+# 层常量: Display.LAYER_VIDEO1, Display.LAYER_VIDEO2, Display.LAYER_OSD0~OSD3
+# ⚠️ VIDEO1/2 仅 bind_layer 可用; OSD0~3 bind_layer 和 show_image 均可用
+# ⚠️ OSD 层背景黑色(0,0,0)=透明, 下层 VIDEO 透出
+Display.show_image(img, x=0, y=0, layer=Display.LAYER_OSD0)
 Display.deinit()
 ```
 
@@ -3312,8 +3337,8 @@ pl.destroy()
 | 4 | **Timer** | **硬件定时器 [0-5] 暂不可用**，仅 `Timer(-1)` 软件定时器可用。多路定时需求需自行用 `ticks_ms` 实现 |
 | 5 | **I2C Slave** | `I2C_Slave.list()` 返回设备 ID 列表，但 ID 含义未说明。需从示例代码反推用法 |
 | 6 | **hashlib** | `hexdigest()` 方法未实现，需用 `binascii.hexlify(hash.digest())` 替代 |
-| 7 | **Sensor** | 说明"同时使用多个传感器时，仅需其中一个执行 run"，但 stop 需每个都调用——容易遗漏 |
-| 8 | **Display** | `bind_layer()` 必须在 `init()` 之前调用，顺序要求容易出错 |
+| 7 | **Sensor** | 说明"同时使用多个传感器时，仅需其中一个执行 run"，但 stop 需每个都调用——容易遗漏. 庐山派 GC2093 用 `Sensor(id=2)` 指定 CSI 2 接口 |
+| 8 | **Display bind_layer** | `bind_layer()` 必须在 `init()` 之前调用. `**bind_info` dict拆包, 层常量 `Display.LAYER_VIDEO1`, **不是** `src=sensor.bind_info(), dstlayer=LAYER_VIDEO1` |
 | 9 | **uctypes** | 位域定义语法 `offset \| type \| lsbit<<BF_POS \| bitsize<<BF_LEN` 极易写错，无误用保护 |
 | 10 | **Pin 中断** | 老固件(≤2025.4)不支持 Pin.irq()，**2025年5月+固件**已支持。老版本可用 `GPIO.irq()`(仅GPIOHS引脚)替代 |
 | 11 | **ADC 电压** | ADC 仅支持 **1.8V 输入**，超压会烧毁芯片！ADC 仅在 FPC 排线座引出，普通排针无 ADC |
@@ -3328,7 +3353,7 @@ pl.destroy()
 | 20 | **Display 初始化顺序** | MediaManager.init 在 Display.init 之前会导致失败。**正确顺序**: Display.init → MediaManager.init → sensor.run |
 | 21 | **FPIOA 重复配置** | `fpioa.set_function()` 每个 GPIO 功能号只能分配给一个物理引脚。`Pin()` 和 `Display.init` 内部自动配 FPIOA，手动再配会冲突报 `set pin func failed` |
 | 22 | **GP7101 背光** | 庐山派3.1寸MIPI扩展板使用 GP7101(I2C→PWM) + SY7201 升压恒流驱动背光。GP7101 地址 0x58, PWM 寄存器 0x00(频率) 和 0x02(占空比)。与触摸共用 I2C 总线 |
-| 23 | **GC2093 分辨率** | 800x480 非标准分辨率, 可能被 fallback 导致画面不对。**支持**: QVGA(320x240)/VGA(640x480)/HD(1280x720)/FHD(1920x1080) |
+| 23 | **GC2093 分辨率** | ~~800x480 非标准分辨率~~ **LCKFB 固件实测支持 800x480**, 匹配 ST7701 LCD 同尺寸零缩放. 其他固件版本可能不支持, 降级用 VGA(640x480) |
 | 24 | **f-string** | MicroPython 不支持 f-string 格式说明符 (如 `f"{x:02X}"`)。**报 SyntaxError**。用 `%` 格式化: `"%02X" % x` |
 | 25 | **PWM 构造器关键字** | `PWM(0, freq=50, duty=7.5, enable=True)` 报 `TypeError: missing 1 required positional arg`。PWM C 层构造器**不支持关键字参数**。**正确**: `PWM(0, 50)` (仅2个位置参数: 通道号, 频率) |
 | 26 | **PWM enable** | `pwm.enable(True/False)` 无效。**正确**: `pwm.enable(1)` 开 / `pwm.enable(0)` 关 |
@@ -3336,6 +3361,13 @@ pl.destroy()
 | 28 | **Pin 方法不存在** | `pin.high()/low()/on()/off()` 均报 `AttributeError`。K230 只有 `pin.value(1)` / `pin.value(0)` |
 | 29 | **GPIO 也需 FPIOA** | GPIO 输出/输入也必须先 `fpioa.set_function(pin, FPIOA.GPIOxx)` 再 `Pin()`。不能跳过 FPIOA 直接 Pin() |
 | 30 | **伺服软件PWM** | 主循环 `ticks_us` 模拟舵机 PWM 不可用——50fps≈20ms分辨率, 无法产生 500~2500us 级脉宽, 舵机随机抖动。必须用硬件 PWM |
+| 31 | **Sensor 构造** | `Sensor(width=1920,height=1080)` 在 IDE VIRT 模式可用, 但 MIPI 物理屏需 `Sensor(id=2)` 指定 CSI 2 接口 |
+| 32 | **bind_info 返回格式** | `sensor.bind_info()` 返回 **dict** (不是 tuple): `{'src':(mod,dev,layer), 'rect':(x,y,w,h), 'pix_format':...}`. 必须 `**bind_info` 拆包传给 `bind_layer()` |
+| 33 | **bind_layer 参数** | `Display.bind_layer(**bind_info, layer=Display.LAYER_VIDEO1)` — 旧文档中 `src=sensor.bind_info(), dstlayer=LAYER_VIDEO1` 参数名和常量名均已过时 |
+| 34 | **LAYER 常量** | `LAYER_VIDEO1`/`LAYER_OSD0` 不存在于 CanMV v1.2.2. **正确**: `Display.LAYER_VIDEO1`/`Display.LAYER_OSD0` (0/2) |
+| 35 | **GC2093 800x480** | LCKFB 固件上 GC2093 **实测支持** `set_framesize(800,480)`, 匹配 ST7701 LCD 零缩放. 此前的"非标准分辨率"警告对 LCKFB 固件不适用 |
+| 36 | **双通道限制** | GC2093 双通道 (CH0 显示+CH1 检测) 在 CanMV v1.2.2 上 `snapshot chn(1) failed(3)`. **用单通道 800x480 即可** |
+| 37 | **MIPI屏直出模式** | 最简可靠架构: 单通道 800x480 RGB565 → snapshot → 检测+UI绘制 → `Display.show_image(img)` 直出. 无需 bind_layer/OSD层/双通道 |
 
 ---
 
