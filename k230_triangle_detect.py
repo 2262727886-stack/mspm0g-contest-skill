@@ -1,8 +1,8 @@
 """
 K230 三角形识别 — 最小可实现单元
 ================================
-算法: find_blobs(LAB颜色) → 逐blob裁剪ROI → ROI内几何检测 → 短边筛选
-关键: 几何检测仅在颜色确认的blob区域内进行, 背景区域不参与
+算法: blob颜色 → 原地灰度二值 → 逐blob用 find_rects(roi=...) → 短边筛选
+零 copy: find_rects 自带 roi 参数限定检测区域, 背景不参与, 无额外内存
 
 硬件: 庐山派 K230 + GC2093 + MIPI ST7701
 """
@@ -19,56 +19,41 @@ import image, time, os, gc, math
 THRESHOLD = [(20, 100, 15, 127, -20, 80)]
 
 # ============================================================
-# 二、三角形检测 (逐blob ROI, 背景不参与几何检测)
+# 二、三角形检测 (零copy: find_rects roi参数限定区域)
 # ============================================================
 
-def find_triangles(img, threshold, min_area=500, edge_ratio=0.25):
+def find_triangles(img, blob_regions, threshold, min_area=500, edge_ratio=0.25):
     """
-    返回 [(cx, cy, x, y, w, h), ...] — 全图坐标
-    策略: find_blobs → 每个blob裁剪ROI → ROI内几何检测 → 坐标还原
-    背景区域完全不参与 find_rects, 从根本上消除背景误检
+    在 img 上原地检测三角形 (img: RGB565 → GRAYSCALE → BINARY).
+    blob_regions: 预检测的 [(x,y,w,h), ...] 颜色区域列表.
+    零 copy: 用 find_rects(roi=blob区域) 限定检测范围.
+    返回 [(cx, cy, x, y, w, h), ...]
     """
     L_lo = threshold[0][0]
     L_hi = threshold[0][1]
 
-    # Step 1: 颜色blob (全图, RGB565)
-    blobs = img.find_blobs(threshold, pixels_threshold=50,
-                           area_threshold=400, merge=True, margin=10)
-    if not blobs:
+    if not blob_regions:
         return []
 
+    # Step 2: 原地灰度 + 二值 (全帧, 0额外内存)
+    img.to_grayscale()
+    img.binary([(L_lo, L_hi)])
+    img.open(1)
+
+    # Step 3: 逐blob区域做几何检测 (用 find_rects 自带 roi, 零copy)
     result = []
-
-    # Step 2: 逐blob处理 — 只在颜色区域做几何检测
-    for b in blobs:
-        bx, by = b.x(), b.y()
-        bw, bh = b.w(), b.h()
-
-        # 面积过滤
-        if bw * bh < min_area:
-            continue
-
-        # 裁剪 ROI (仅blob区域, 通常 < 100KB, 远小于全帧768KB)
-        try:
-            roi = img.copy(roi=(bx, by, bw, bh))
-        except:
-            continue  # ROI 裁剪失败则跳过此blob
-
-        # ROI内: 灰度 → 二值 → find_rects
-        roi.to_grayscale()
-        roi.binary([(L_lo, L_hi)])
-        roi.open(1)
-
-        quads = roi.find_rects(threshold=max(500, bw * bh // 20))
+    for (bx, by, bw, bh) in blob_regions[:8]:  # 最多8个blob
+        quads = img.find_rects(roi=(bx, by, bw, bh),
+                               threshold=max(500, bw * bh // 20))
         if not quads:
             continue
 
-        # Step 3: ROI内短边筛选 → 三角形候选
         for r in quads:
             c = r.corners()
             if len(c) != 4:
                 continue
 
+            # 4边长度
             e = []
             for i in range(4):
                 dx = c[i][0] - c[(i+1)%4][0]
@@ -79,13 +64,11 @@ def find_triangles(img, threshold, min_area=500, edge_ratio=0.25):
             if mx == 0 or mn/mx >= edge_ratio:
                 continue
 
-            # ROI坐标 → 全图坐标
-            cx = bx + sum(p[0] for p in c) // 4
-            cy = by + sum(p[1] for p in c) // 4
-            rx = bx + r.x()
-            ry = by + r.y()
-            rw = r.w()
-            rh = r.h()
+            # 重心 (ROI内坐标即全图坐标, find_rects返回绝对坐标)
+            cx = sum(p[0] for p in c) // 4
+            cy = sum(p[1] for p in c) // 4
+            rx, ry = r.x(), r.y()
+            rw, rh = r.w(), r.h()
 
             if rw * rh >= min_area:
                 result.append((cx, cy, rx, ry, rw, rh))
@@ -99,7 +82,7 @@ def find_triangles(img, threshold, min_area=500, edge_ratio=0.25):
 # ============================================================
 
 print("=== K230 三角形检测 ===")
-print("算法: blob颜色ROI → 逐ROI几何检测 → 短边筛选")
+print("算法: blob→灰度二值→find_rects(roi=blob)  零copy")
 
 sensor = Sensor(id=2)
 sensor.reset()
@@ -127,34 +110,36 @@ try:
 
         img = sensor.snapshot(chn=CAM_CHN_ID_0)
 
-        # 检测 (img 保持 RGB565, 不被修改)
-        tris = find_triangles(img, THRESHOLD)
-
-        # 画结果
-        for i, (cx, cy, x, y, w, h) in enumerate(tris):
-            color = (0, 255, 0) if i == 0 else (255, 165, 0)
-            img.draw_rectangle(x, y, w, h, color=color, thickness=3)
-            img.draw_cross(cx, cy, color=(0, 255, 0), size=18)
-            img.draw_string_advanced(cx + 22, cy - 10, 18,
-                                     "T%d" % (i + 1), color=(0, 255, 0))
-
-        # 也画出所有blob (辅助调试)
+        # 一次 find_blobs: 画黄框 + 收集区域 (RGB565状态)
         blobs = img.find_blobs(THRESHOLD, pixels_threshold=50,
                                area_threshold=400, merge=True, margin=10)
+        blob_regions = []
         if blobs:
             for b in blobs:
-                img.draw_rectangle(b.x(), b.y(), b.w(), b.h(),
-                                   color=(255, 255, 0), thickness=1)
+                if b.w() * b.h() >= 500:
+                    blob_regions.append((b.x(), b.y(), b.w(), b.h()))
+                    img.draw_rectangle(b.x(), b.y(), b.w(), b.h(),
+                                       color=(255, 255, 0), thickness=1)
+
+        # 三角形检测 (会修改 img 为灰度→二值, 用 roi 参数限定范围)
+        tris = find_triangles(img, blob_regions, THRESHOLD)
+
+        # 画三角形 (在二值图上用白色画)
+        for i, (cx, cy, x, y, w, h) in enumerate(tris):
+            c = 255 if i == 0 else 200
+            img.draw_rectangle(x, y, w, h, color=c, thickness=2)
+            img.draw_cross(cx, cy, color=c, size=16)
+            img.draw_string_advanced(cx+18, cy-8, 16, "T%d"%(i+1), color=c)
 
         if tris:
-            s = "Tri x%d (%d,%d)" % (len(tris), tris[0][0], tris[0][1])
-            img.draw_string_advanced(10, 10, 24, s, color=(0, 255, 0))
+            s = "Tri x%d (%d,%d) area=%d" % (len(tris), tris[0][0], tris[0][1],
+                                              tris[0][4]*tris[0][5])
+            img.draw_string_advanced(10, 10, 20, s, color=255)
         else:
-            img.draw_string_advanced(10, 10, 24, "No Triangle",
-                                     color=(255, 100, 100))
+            img.draw_string_advanced(10, 10, 20, "No Triangle", color=200)
 
-        fps_s = "FPS:%d" % max(1, clock.fps())
-        img.draw_string_advanced(700, 10, 18, fps_s, color=(180, 180, 180))
+        info = "blob:%d FPS:%d" % (len(blob_regions), max(1, clock.fps()))
+        img.draw_string_advanced(10, 34, 16, info, color=180)
 
         Display.show_image(img)
 
