@@ -10,12 +10,12 @@ from media.display import *
 from media.media import *
 import image, time, os, gc, math
 
-PW, PH = 400, 240
+PW, PH = 320, 240          # ← 从 400 降到 320, find_blobs LAB 转换省 30% buffer
 DW, DH = 800, 480
 ox = (DW - PW) // 2
 oy = (DH - PH) // 2
 
-STAGE = 0  # 0=纯显示 1=只snapshot 2=+blob 3=+rect 4=+三角
+STAGE = 2  # 0=纯显示 1=抓帧 2=+blob 3=+rect 4=+三角
 THRESHOLD = [(20, 100, 15, 127, -20, 80)]
 
 print("=== 诊断 Stage=%d ===" % STAGE)
@@ -63,16 +63,16 @@ try:
         tris = []
 
         if STAGE >= 2:
-            blobs = img.find_blobs(THRESHOLD, pixels_threshold=20,
-                                   area_threshold=100, merge=True, margin=5)
+            blobs = img.find_blobs(THRESHOLD, pixels_threshold=15,
+                                   area_threshold=80, merge=True, margin=5)
             if blobs:
                 for b in blobs:
-                    if b.w() * b.h() >= 200:
+                    if b.w() * b.h() >= 150:
                         img.draw_rectangle(b.x(), b.y(), b.w(), b.h(),
                                            color=(255, 200, 0), thickness=1)
 
         if STAGE >= 3:
-            rects = img.find_rects(threshold=5000)
+            rects = img.find_rects(threshold=4000)
 
         if STAGE >= 4 and rects:
             for r in rects:
@@ -85,7 +85,7 @@ try:
                     dy = c[i][1] - c[(i+1)%4][1]
                     e.append(math.sqrt(dx*dx + dy*dy))
                 mx, mn = max(e), min(e)
-                if mx > 0 and mn/mx < 0.25 and r.w()*r.h() >= 200:
+                if mx > 0 and mn/mx < 0.25 and r.w()*r.h() >= 150:
                     cx = sum(p[0] for p in c) // 4
                     cy = sum(p[1] for p in c) // 4
                     ok = True
