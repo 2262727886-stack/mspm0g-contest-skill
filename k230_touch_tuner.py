@@ -21,7 +21,7 @@ import image, time, os, gc, math
 # ============================================================
 
 SW, SH = 800, 480
-CW, CH = 800, 480
+CW, CH = 640, 480          # VGA: 节省内存, 避免 MMZ 溢出崩溃
 
 # ============================================================
 # 二、检测模式
@@ -154,30 +154,7 @@ def auto_calibrate(img):
         return False, 0
 
 # ============================================================
-# 五、颜色预过滤 (blob检测, 用于限定几何检测范围)
-# ============================================================
-
-def _get_color_mask(img):
-    """
-    用 LAB 阈值找颜色区域, 返回 (blobs列表, 二值mask图).
-    后续几何检测仅在 blob 区域内进行, 减少背景误检.
-    """
-    th = threshold_get()
-    blobs = img.find_blobs(th, pixels_threshold=50,
-                           area_threshold=300, merge=True, margin=10)
-    if not blobs:
-        return [], None
-
-    # 生成 blob 区域的二值 mask (在灰度图上, blob区域画白)
-    gray = img.to_grayscale(copy=True)
-    mask = image.Image(CW, CH, image.GRAYSCALE)
-    mask.draw_rectangle(0, 0, CW, CH, color=0, fill=True)  # 全黑
-    for b in blobs:
-        mask.draw_rectangle(b.x(), b.y(), b.w(), b.h(), color=255, fill=True)
-    return blobs, mask
-
-# ============================================================
-# 六、形状检测
+# 五、形状检测 (复用灰度图减少内存)
 # ============================================================
 
 OVERLAYS = []
@@ -188,88 +165,82 @@ def detect_shapes(img):
     OVERLAYS = []
     th = threshold_get()
 
-    # --- 获取颜色预过滤 ---
-    blobs, _ = _get_color_mask(img)
+    # 颜色 blobs (各种形状共用)
+    blobs = img.find_blobs(th, pixels_threshold=30,
+                           area_threshold=200, merge=True, margin=10)
+
+    # 灰度图 + 二值图 (几何检测共用, 只创建一次)
+    gray = img.to_grayscale(copy=True)
 
     if detect_mode == MODE_CIRCLE:
-        return _detect_circles(img)
-
+        return _detect_circles(gray, img, blobs)
     elif detect_mode == MODE_RECT:
-        return _detect_rects(img, blobs)
-
+        return _detect_rects(gray, blobs)
     elif detect_mode == MODE_TRIANGLE:
-        return _detect_triangles(img, blobs)
+        return _detect_triangles(gray, blobs)
 
     return 0, 0, 0, ""
 
 
-def _detect_circles(img):
-    """圆形: 降采样2x → 霍夫圆 → 坐标还原, 大幅提速"""
-    # 降采样到 400x240 (4x 更少像素)
-    gray = img.to_grayscale(copy=True)
+def _detect_circles(gray, color_img, blobs):
+    """圆形: 降采样2x → 霍夫圆 → 坐标还原"""
     try:
-        gray.midpoint_pool(2, 2)  # 800x480 → 400x240
+        gray.midpoint_pool(2, 2)  # 640x480 → 320x240
+        scale = 2
     except:
-        pass  # 部分固件不支持, 用原始尺寸
+        scale = 1
 
     circles = gray.find_circles(
-        threshold=2500, r_min=8, r_max=80,
+        threshold=2000, r_min=6, r_max=60,
         r_step=2, x_margin=10, y_margin=10,
-        x_stride=3, y_stride=2)  # 跳像素加速
+        x_stride=3, y_stride=2)
 
     if circles:
-        scale = 2  # 降采样倍数
         for c in circles[:10]:
-            cx_s = c.x() * scale
-            cy_s = c.y() * scale
-            r_s  = c.r() * scale
-            OVERLAYS.append(('circle', cx_s, cy_s, r_s, 0,
-                             MODE_COLORS[MODE_CIRCLE]))
+            OVERLAYS.append(('circle', c.x() * scale, c.y() * scale,
+                             c.r() * scale, 0, MODE_COLORS[MODE_CIRCLE]))
         best = max(circles, key=lambda c: c.r())
-        cx = best.x() * scale
-        cy = best.y() * scale
-        r  = best.r() * scale
-        OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
-        OVERLAYS.append(('label', cx + 35, cy - 20, "r=%d" % r, (0, 255, 0)))
+        cx, cy = best.x() * scale, best.y() * scale
+        r = best.r() * scale
+        OVERLAYS.append(('cross', cx, cy, 24, 0, (0, 255, 0)))
+        OVERLAYS.append(('label', cx + 28, cy - 16, "r=%d" % r, (0, 255, 0)))
         return len(circles), cx, cy, "r=%d" % r
 
     # 降级: blob roundness
-    th = threshold_get()
-    blobs = img.find_blobs(th, pixels_threshold=50,
-                           area_threshold=400, merge=True, margin=10)
-    for b in blobs:
-        if b.roundness() > 0.70 and b.area() > 400:
-            OVERLAYS.append(('circle', b.cx(), b.cy(),
-                             max(b.w(), b.h()) // 2, 0,
-                             MODE_COLORS[MODE_CIRCLE]))
-    if OVERLAYS:
-        b = max(blobs, key=lambda x: x.area())
-        OVERLAYS.append(('cross', b.cx(), b.cy(), 30, 0, (0, 255, 0)))
-        return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
+    if blobs:
+        for b in blobs:
+            if b.roundness() > 0.70 and b.area() > 300:
+                OVERLAYS.append(('circle', b.cx(), b.cy(),
+                                 max(b.w(), b.h()) // 2, 0,
+                                 MODE_COLORS[MODE_CIRCLE]))
+        if OVERLAYS:
+            b = max(blobs, key=lambda x: x.area())
+            OVERLAYS.append(('cross', b.cx(), b.cy(), 24, 0, (0, 255, 0)))
+            return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
     return 0, 0, 0, ""
 
 
-def _detect_rects(img, blobs):
-    """矩形: 颜色blob预过滤 + find_rects, 减少背景噪点"""
-    gray = img.to_grayscale(copy=True)
+def _detect_rects(gray, blobs):
+    """矩形: 二值化 → find_rects → 颜色验证"""
     bin_img = gray.binary([(L_MIN, L_MAX)])
     bin_img.open(1)
 
-    rects = bin_img.find_rects(threshold=8000)
-    if not rects and blobs:
-        # 降级: blob roundness
-        for b in blobs:
-            rn = b.roundness()
-            if 0.62 < rn < 0.84 and b.area() > 500:
-                OVERLAYS.append(('rect', b.x(), b.y(), b.w(), b.h(),
-                                 MODE_COLORS[MODE_RECT]))
-        if OVERLAYS:
-            b = max(blobs, key=lambda x: x.area())
-            OVERLAYS.append(('cross', b.cx(), b.cy(), 30, 0, (0, 255, 0)))
-            return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
+    rects = bin_img.find_rects(threshold=6000)
+
+    if not rects:
+        if blobs:
+            for b in blobs:
+                rn = b.roundness()
+                if 0.62 < rn < 0.84 and b.area() > 300:
+                    OVERLAYS.append(('rect', b.x(), b.y(), b.w(), b.h(),
+                                     MODE_COLORS[MODE_RECT]))
+            if OVERLAYS:
+                b = max(blobs, key=lambda x: x.area())
+                OVERLAYS.append(('cross', b.cx(), b.cy(), 24, 0, (0, 255, 0)))
+                return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
         return 0, 0, 0, ""
 
-    # 颜色验证: rect 重心必须在 blob 区域内
+    # 颜色验证
     valid = []
     for r in rects:
         crn = r.corners()
@@ -283,7 +254,7 @@ def _detect_rects(img, blobs):
                     b.y() <= rcy <= b.y() + b.h()):
                     ok = True
                     break
-        if ok and r.w() * r.h() > 800:
+        if ok and r.w() * r.h() > 500:
             valid.append(r)
 
     if valid:
@@ -294,34 +265,30 @@ def _detect_rects(img, blobs):
         crn = best.corners()
         cx = sum(c[0] for c in crn) // 4
         cy = sum(c[1] for c in crn) // 4
-        OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
+        OVERLAYS.append(('cross', cx, cy, 24, 0, (0, 255, 0)))
         return len(valid), cx, cy, ""
     return 0, 0, 0, ""
 
 
-def _detect_triangles(img, blobs):
-    """三角形: 颜色blob预过滤 + find_rects低阈值 + 短边筛选"""
-    gray = img.to_grayscale(copy=True)
+def _detect_triangles(gray, blobs):
+    """三角形: find_rects低阈值 + 短边筛选 + 颜色验证"""
     bin_img = gray.binary([(L_MIN, L_MAX)])
     bin_img.open(1)
 
-    all_quads = bin_img.find_rects(threshold=4000)
+    all_quads = bin_img.find_rects(threshold=3000)
     tri_candidates = []
 
     for r in all_quads:
         corners = r.corners()
         if len(corners) != 4:
             continue
-        # 计算边长
         edges = []
         for i in range(4):
             dx = corners[i][0] - corners[(i + 1) % 4][0]
             dy = corners[i][1] - corners[(i + 1) % 4][1]
             edges.append(math.sqrt(dx * dx + dy * dy))
         min_e, max_e = min(edges), max(edges)
-        # 短边 < 长边 25% → 三角形(一角折叠)
-        if max_e > 0 and min_e / max_e < 0.25 and r.w() * r.h() > 800:
-            # 颜色验证
+        if max_e > 0 and min_e / max_e < 0.25 and r.w() * r.h() > 500:
             crn = r.corners()
             rcx = sum(c[0] for c in crn) // 4
             rcy = sum(c[1] for c in crn) // 4
@@ -344,19 +311,19 @@ def _detect_triangles(img, blobs):
         crn = best.corners()
         cx = sum(c[0] for c in crn) // 4
         cy = sum(c[1] for c in crn) // 4
-        OVERLAYS.append(('cross', cx, cy, 30, 0, (0, 255, 0)))
+        OVERLAYS.append(('cross', cx, cy, 24, 0, (0, 255, 0)))
         return len(tri_candidates), cx, cy, ""
 
     # 降级: blob roundness
     if blobs:
         for b in blobs:
             rn = b.roundness()
-            if 0.40 < rn < 0.65 and b.area() > 500:
+            if 0.40 < rn < 0.65 and b.area() > 300:
                 OVERLAYS.append(('rect', b.x(), b.y(), b.w(), b.h(),
                                  MODE_COLORS[MODE_TRIANGLE]))
         if OVERLAYS:
             b = max(blobs, key=lambda x: x.area())
-            OVERLAYS.append(('cross', b.cx(), b.cy(), 30, 0, (0, 255, 0)))
+            OVERLAYS.append(('cross', b.cx(), b.cy(), 24, 0, (0, 255, 0)))
             return len(OVERLAYS) - 1, b.cx(), b.cy(), ""
     return 0, 0, 0, ""
 
@@ -514,7 +481,7 @@ try:
 
         img = sensor.snapshot(chn=CAM_CHN_ID_0)
 
-        # --- 检测 ---
+        # --- 检测 (640x480) ---
         count, cx, cy, extra = detect_shapes(img)
 
         # --- 实时 blob 计数 ---
@@ -522,6 +489,12 @@ try:
                                    pixels_threshold=10,
                                    area_threshold=50, merge=True)
         blob_total = len(all_blobs) if all_blobs else 0
+
+        # --- 缩放到 800x480 (UI以800x480绘制, 需匹配) ---
+        try:
+            img.resize(SW, SH)
+        except:
+            pass  # resize 不可用时屏幕硬件会拉伸 640→800
 
         # --- UI ---
         draw_ui(img, count, cx, cy, blob_total)
