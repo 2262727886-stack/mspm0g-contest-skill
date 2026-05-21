@@ -38,7 +38,7 @@ def find_triangles(img, blob_regions, threshold, min_area=500, edge_ratio=0.25):
     # Step 2: 原地灰度 + 二值 (全帧, 0额外内存)
     img.to_grayscale()
     img.binary([(L_lo, L_hi)])
-    img.open(1)
+    # img.open(1) — 省略以节省 fast frame buffer stack
 
     # Step 3: 逐blob区域做几何检测 (用 find_rects 自带 roi, 零copy)
     result = []
@@ -86,7 +86,7 @@ print("算法: blob→灰度二值→find_rects(roi=blob)  零copy")
 
 sensor = Sensor(id=2)
 sensor.reset()
-sensor.set_framesize(width=800, height=480)
+sensor.set_framesize(width=640, height=480)
 sensor.set_pixformat(Sensor.RGB565)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
@@ -111,12 +111,12 @@ try:
         img = sensor.snapshot(chn=CAM_CHN_ID_0)
 
         # 一次 find_blobs: 画黄框 + 收集区域 (RGB565状态)
-        blobs = img.find_blobs(THRESHOLD, pixels_threshold=50,
-                               area_threshold=400, merge=True, margin=10)
+        blobs = img.find_blobs(THRESHOLD, pixels_threshold=40,
+                               area_threshold=300, merge=True, margin=10)
         blob_regions = []
         if blobs:
             for b in blobs:
-                if b.w() * b.h() >= 500:
+                if b.w() * b.h() >= 400:
                     blob_regions.append((b.x(), b.y(), b.w(), b.h()))
                     img.draw_rectangle(b.x(), b.y(), b.w(), b.h(),
                                        color=(255, 255, 0), thickness=1)
