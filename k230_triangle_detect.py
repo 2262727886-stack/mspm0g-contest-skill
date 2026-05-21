@@ -22,7 +22,7 @@ THRESHOLD = [(20, 100, 15, 127, -20, 80)]
 # 二、三角形检测 (零copy: find_rects roi参数限定区域)
 # ============================================================
 
-def find_triangles(img, blob_regions, threshold, min_area=500, edge_ratio=0.25):
+def find_triangles(img, blob_regions, threshold, min_area=80, edge_ratio=0.25):
     """
     在 img 上原地检测三角形 (img: RGB565 → GRAYSCALE → BINARY).
     blob_regions: 预检测的 [(x,y,w,h), ...] 颜色区域列表.
@@ -44,7 +44,7 @@ def find_triangles(img, blob_regions, threshold, min_area=500, edge_ratio=0.25):
     result = []
     for (bx, by, bw, bh) in blob_regions[:8]:  # 最多8个blob
         quads = img.find_rects(roi=(bx, by, bw, bh),
-                               threshold=max(500, bw * bh // 20))
+                               threshold=max(100, bw * bh // 15))
         if not quads:
             continue
 
@@ -86,7 +86,7 @@ print("算法: blob→灰度二值→find_rects(roi=blob)  零copy")
 
 sensor = Sensor(id=2)
 sensor.reset()
-sensor.set_framesize(width=640, height=480)
+sensor.set_framesize(width=320, height=240)  # QVGA: to_grayscale不崩溃
 sensor.set_pixformat(Sensor.RGB565)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
@@ -111,15 +111,15 @@ try:
         img = sensor.snapshot(chn=CAM_CHN_ID_0)
 
         # 一次 find_blobs: 画黄框 + 收集区域 (RGB565状态)
-        blobs = img.find_blobs(THRESHOLD, pixels_threshold=40,
-                               area_threshold=300, merge=True, margin=10)
+        blobs = img.find_blobs(THRESHOLD, pixels_threshold=10,
+                               area_threshold=60, merge=True, margin=5)
         blob_regions = []
         if blobs:
             for b in blobs:
-                if b.w() * b.h() >= 400:
+                if b.w() * b.h() >= 80:
                     blob_regions.append((b.x(), b.y(), b.w(), b.h()))
                     img.draw_rectangle(b.x(), b.y(), b.w(), b.h(),
-                                       color=(255, 255, 0), thickness=1)
+                                       color=(255, 200, 0), thickness=1)
 
         # 三角形检测 (会修改 img 为灰度→二值, 用 roi 参数限定范围)
         tris = find_triangles(img, blob_regions, THRESHOLD)
@@ -127,19 +127,18 @@ try:
         # 画三角形 (在二值图上用白色画)
         for i, (cx, cy, x, y, w, h) in enumerate(tris):
             c = 255 if i == 0 else 200
-            img.draw_rectangle(x, y, w, h, color=c, thickness=2)
-            img.draw_cross(cx, cy, color=c, size=16)
-            img.draw_string_advanced(cx+18, cy-8, 16, "T%d"%(i+1), color=c)
+            img.draw_rectangle(x, y, w, h, color=c, thickness=1)
+            img.draw_cross(cx, cy, color=c, size=10)
+            img.draw_string_advanced(cx+12, cy-6, 12, "T%d"%(i+1), color=c)
 
         if tris:
-            s = "Tri x%d (%d,%d) area=%d" % (len(tris), tris[0][0], tris[0][1],
-                                              tris[0][4]*tris[0][5])
-            img.draw_string_advanced(10, 10, 20, s, color=255)
+            s = "Tri x%d (%d,%d)" % (len(tris), tris[0][0], tris[0][1])
+            img.draw_string_advanced(4, 4, 14, s, color=255)
         else:
-            img.draw_string_advanced(10, 10, 20, "No Triangle", color=200)
+            img.draw_string_advanced(4, 4, 14, "No Triangle", color=200)
 
         info = "blob:%d FPS:%d" % (len(blob_regions), max(1, clock.fps()))
-        img.draw_string_advanced(10, 34, 16, info, color=180)
+        img.draw_string_advanced(4, 20, 12, info, color=160)
 
         Display.show_image(img)
 
