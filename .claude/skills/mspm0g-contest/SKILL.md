@@ -26,6 +26,9 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **K230** | GP7101 I2C→PWM 背光控制 | ✅ 已验证 | I2C3 addr=0x58, 12-bit PWM |
 | **K230** | image.Image 独立画布 | ✅ 已验证 | 800x480, 触摸UI绘制 |
 | **K230** | PWM2 舵机控制 (GPIO46) | ✅ 已验证 | 实机, 07例程模式 |
+| **K230** | 800x480 全屏直出+右侧触摸菜单 | ✅ 已验证 | GC2093+ST7701, 单通道 snapshot, 运行流畅 |
+| **K230** | 矩形/三角形/圆形颜色阈值识别 | ✅ 已验证 | find_blobs ROI + x/y stride + 一键 LAB 校准 |
+| **K230** | 小图软件放大到800x480 | ❌ 不可用 | CanMV v1.2.2 报 Image size is too large |
 | **K230** | 激光光斑检测 | ❌ 未实现 | |
 | **K230** | 画圆轨迹验证 | ❌ 未实现 | |
 | **M0G** | 拓展板引脚分配表 | ✅ 已验证 | SysConfig 外设扫描 |
@@ -38,7 +41,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **M0G** | TIMA0 舵机 | 🟡 代码就绪 | 待实机 |
 | **M0G** | I2C 通用驱动 (i2c_write_bytes) | ✅ 已验证 | 传参复用, 支持双总线 |
 | **M0G** | I2C0 OLED SSD1306 (PA28/PA31) | ✅ 已验证 | 5x7 字体, 400kHz |
-| **M0G** | I2C1 MPU6050 (PA10/PA11) | ✅ 已验证 | 独立总线, 400kHz, 数据稳定 |
+| **M0G** | I2C1 MPU6050 | ⚠️ 引脚待确认 | 禁止 PA10/PA11；这两个脚被 CH340 占用 |
 | **M0G** | ADC0 8路TCRT5000 | 🟡 代码就绪 | 待实机 |
 | **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 已验证 | 实机烧录成功 |
 | **M0G** | XDS110 SWD 快速烧录脚本 | ✅ 已验证 | DSLite 命令行 ~4.3秒 |
@@ -181,7 +184,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | 比较器 | 3×高速比较器 (COMP0/1/2) |
 | 通用定时器 | 7×16-bit (TIMG0~TIMG6) |
 | 高级定时器 | 1×16-bit (TIMA0, 支持互补 PWM / 死区) |
-| UART | 2× (UART0/1) |
+| UART | 以 SysConfig 实际可选实例为准；本文模板使用 UART0/1/2/3 时必须先在 SysConfig 中确认 |
 | I2C | 2× (I2C0/1) |
 | SPI | 2× (SPI0/1) |
 | CAN | CAN-FD ×1 |
@@ -279,7 +282,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 // PA28 = SDA (I2C0_SDA), PA31 = SCL (I2C0_SCL)
 
 // MPU6050 — I2C1 (与OLED分离,独立总线)
-// PA10 = SDA (I2C1_SDA), PA11 = SCL (I2C1_SCL)
+// ⚠️ PA10/PA11 已被板载 CH340 固定占用，不能再接 MPU6050
+// MPU6050 引脚必须按实际扩展板重新确认，并在 SysConfig 中选择未占用的 I2C1 SDA/SCL
 
 // 电机 PWM (TB6612) — TIMG8
 // PB15 = PWMA (TIMG8_C0), PB16 = PWMB (TIMG8_C1)
@@ -317,7 +321,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | 外设需求 | 拓展板引脚 | 片上资源 | 原因 |
 |----------|-----------|----------|------|
 | **OLED SDA/SCL** | PA28, PA31 | I2C0 | 板载上拉 |
-| **MPU6050 SDA/SCL** | PA10, PA11 | I2C1 | **独立总线**,不与OLED冲突 |
+| **MPU6050 SDA/SCL** | 待用户确认，禁止 PA10/PA11 | I2C1/软件I2C | PA10/PA11 已被 CH340 占用，必须另选未占用引脚并经 SysConfig 验证 |
 | **电机 PWM** | PB15, PB16 | TIMG8_C0/C1 | 不与TIMA0冲突 |
 | **电机方向** | PA13,PA12,PB0,PB1 | GPIO | TB6612 AIN1/2, BIN1/2 |
 | **编码器A** | PA15, PA16 | GPIO双边沿中断 | TIMA1不支持QEI |
@@ -370,8 +374,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **MG310 编码器B-A** | 电机编码器 | PA17 (TIMG7_CH0) | TIMG7正交编码 |
 | **MG310 编码器B-B** | | PA24 (TIMG7_CH1) | |
 | **TCRT5000 ×8** | 红外循迹 | PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7 | 8路ADC |
-| **MPU6050 SDA** | 六轴陀螺仪 | PA10 (I2C1_SDA) | **独立I2C1总线** |
-| **MPU6050 SCL** | | PA11 (I2C1_SCL) | |
+| **MPU6050 SDA** | 六轴陀螺仪 | 待用户确认，禁止 PA10 | PA10 被 CH340 占用 |
+| **MPU6050 SCL** | | 待用户确认，禁止 PA11 | PA11 被 CH340 占用 |
 | **OLED SDA** | 0.96" SSD1306 | PA28 (I2C0_SDA) | I2C0总线 |
 | **OLED SCL** | | PA31 (I2C0_SCL) | |
 | **舵机1** | SG90/MG996R | PB9 (TIMA0_CH1) | 50Hz PWM |
@@ -420,8 +424,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 |----------|----------|-----------|----------|------|
 | **OLED SCL** | SSD1306 | PA31 | I2C0_SCL | I2C0总线 |
 | **OLED SDA** | SSD1306 | PA28 | I2C0_SDA | 地址 0x3C |
-| **MPU6050 SCL** | MPU6050 | PA11 | I2C1_SCL | **独立于OLED的总线** |
-| **MPU6050 SDA** | MPU6050 | PA10 | I2C1_SDA | 地址 0x68 |
+| **MPU6050 SCL** | MPU6050 | 待用户确认，禁止 PA11 | I2C1/软件I2C | PA11 被 CH340 占用 |
+| **MPU6050 SDA** | MPU6050 | 待用户确认，禁止 PA10 | I2C1/软件I2C | PA10 被 CH340 占用 |
 | **TB6612 PWMA** | TB6612FNG | PB15 | TIMG8_C0 | 左电机 PWM |
 | **TB6612 PWMB** | TB6612FNG | PB16 | TIMG8_C1 | 右电机 PWM |
 | **TB6612 AIN1** | TB6612FNG | PA13 | GPIO | 左电机方向1 |
@@ -634,9 +638,9 @@ int main(void) {
    Speed:         400 kHz, TXFIFO Trigger: BYTES_1
 3. I2C1 (MPU6050):
    Name:          I2C_MPU, Peripheral: I2C1
-   SDA Pin:       PA10, SCL Pin: PA11
+   SDA/SCL Pin:   待用户确认，禁止 PA10/PA11
    Speed:         400 kHz, TXFIFO Trigger: BYTES_1
-4. ⚠️ I2C1 用 PA10/PA11 时需拔掉 CH340 Type-C USB
+4. ⚠️ PA10/PA11 为板载 CH340 固定占用，不要通过“拔掉 USB”来复用
 5. 板载已有上拉电阻, 不需要配内部上拉
 ```
 
@@ -834,7 +838,7 @@ int32_t enc = (int32_t)DL_TimerG_getTimerCount(TIMG7);
 
 // 输入捕获 (TIMG12 HC-SR04)
 void TIMG12_IRQHandler(void) {
-    if (DL_TimerG_getPendingInterrupt(TIMG12) & DL_TIMERG_IIDX_CAPTURE_C0) {
+    if (DL_TimerG_getPendingInterrupt(TIMG12) == DL_TIMERG_IIDX_CAPTURE_C0) {
         uint32_t cap = DL_TimerG_getCaptureCompareValue(TIMG12, 0);
         // ...
     }
@@ -1137,7 +1141,7 @@ void hcsr04_trigger(void) {
 // 输入捕获中断 (ECHO=PA9 双边沿捕获)
 void TIMG12_IRQHandler(void) {
     uint32_t status = DL_TimerG_getPendingInterrupt(TIMG12);
-    if (status & DL_TIMERG_IIDX_CAPTURE_C0) {
+    if (status == DL_TIMERG_IIDX_CAPTURE_C0) {
         static bool rising = true;
         if (rising) {
             echo_start = DL_TimerG_getCaptureCompareValue(TIMG12, 0);
@@ -1203,9 +1207,9 @@ static int i2c_write_bytes(I2C_Regs *i2c, uint8_t addr, const uint8_t *buf, uint
 }
 ```
 
-### --- MPU6050 完整驱动 (I2C1 PA10/PA11, ✅ 实机验证) ---
+### --- MPU6050 完整驱动 (I2C1, 引脚待确认) ---
 
-> **✅ 实测验证**: I2C1 (PA10=SDA, PA11=SCL) 独立总线, 不与OLED冲突
+> ⚠️ PA10/PA11 已被板载 CH340 固定占用，不能再接 MPU6050。以下驱动逻辑可复用，但 SysConfig 中的 I2C1 SDA/SCL 必须按用户实际接线选择未占用引脚，并先实机验证。
 
 ```c
 #define MPU6050_ADDR      0x68
@@ -1278,7 +1282,7 @@ static int mpu_read_all(MPU6050_Data *d) {
 }
 
 // SysConfig 配置:
-// I2C_MPU → I2C1 → SDA: PA10, SCL: PA11, 400kHz, TXFIFO=BYTES_1
+// I2C_MPU → I2C1/软件I2C → SDA/SCL: 按实际接线配置，禁止 PA10/PA11, 400kHz, TXFIFO=BYTES_1
 ```
 
 // 加速度计 → 角度 (pitch: atan2(-ax, sqrt(ay^2+az^2)), roll: atan2(ay, az))
@@ -1378,14 +1382,14 @@ static const uint8_t key_map[KEY_ROWS][KEY_COLS] = {
 };
 
 void matrix_key_init(void) {
-    for (int r = 0; r < KEY_ROWS; r++) {
-        DL_GPIO_setDirection(GPIOB, (1 << (8 + r)), DL_GPIO_OUTPUT);
-        DL_GPIO_clearPins(GPIOB, (1 << (8 + r)));
-    }
-    for (int c = 0; c < KEY_COLS; c++) {
-        DL_GPIO_setDirection(GPIOB, (1 << (12 + c)), DL_GPIO_INPUT);
-        DL_GPIO_setInternalResistor(GPIOB, (1 << (12 + c)), DL_GPIO_RESISTOR_PULL_DOWN);
-    }
+    /*
+     * 方向和上下拉必须在 SysConfig 中配置:
+     * PB8~PB11 = GPIO Output, PB12~PB15 = GPIO Input + Pull-down。
+     * 不要使用 DL_GPIO_setDirection()/DL_GPIO_setInternalResistor()，
+     * 这两个 API 在当前 SDK 模板中列为不可用/不可靠。
+     */
+    DL_GPIO_clearPins(GPIOB,
+        DL_GPIO_PIN_8 | DL_GPIO_PIN_9 | DL_GPIO_PIN_10 | DL_GPIO_PIN_11);
 }
 
 char matrix_key_scan(void) {
@@ -1941,11 +1945,11 @@ void motor_speed_control(DC_Motor *motor, int32_t encoder_val, float dt) {
 
 void servo1_set_angle(uint32_t angle_deg) { // 舵机1 PB9=CH1, 0~180
     uint32_t pulse = SERVO_MIN + (SERVO_MAX - SERVO_MIN) * angle_deg / 180;
-    DL_TimerG_setCaptureCompareValue(TIMA0, 1, pulse);
+    DL_TimerA_setCaptureCompareValue(TIMA0, 1, pulse);
 }
 void servo2_set_angle(uint32_t angle_deg) { // 舵机2 PB8=CH0, 0~180
     uint32_t pulse = SERVO_MIN + (SERVO_MAX - SERVO_MIN) * angle_deg / 180;
-    DL_TimerG_setCaptureCompareValue(TIMA0, 0, pulse);
+    DL_TimerA_setCaptureCompareValue(TIMA0, 0, pulse);
 }
 ```
 
@@ -2938,16 +2942,16 @@ rtc.datetime()  # → (year, mon, day, wday, hour, min, sec, microsec)
 from media.display import Display
 
 # 初始化顺序铁律: Sensor → Display.init → MediaManager.init → sensor.run
-sensor = Sensor(width=1920, height=1080)
+sensor = Sensor(id=2)
 sensor.reset()
-sensor.set_framesize(width=640, height=480)    # VGA, GC2093 原生支持
+sensor.set_framesize(width=240, height=176)    # 检测帧按 8 像素对齐，降低帧缓冲压力
 sensor.set_pixformat(Sensor.RGB565)
-Display.init(Display.ST7701, to_ide=True, width=800, height=480)
+Display.init(Display.ST7701, width=800, height=480)  # 脱机运行；IDE联调需要同步画面时再加 to_ide=True
 MediaManager.init()
 sensor.run()
 
 # 获取帧缓冲 (方式1: sensor snapshot)
-img = sensor.snapshot(chn=CAM_CHN_ID_0)
+img = sensor.snapshot()
 
 # 创建独立画布 (方式2: image.Image, 推荐触摸屏UI用)
 import image
@@ -3075,13 +3079,13 @@ stats = img.get_statistics()
 blobs = img.find_blobs(
     thresholds=[(L_min, L_max, A_min, A_max, B_min, B_max)],
     invert=False,           # True=反相
-    roi=(x, y, w, h),       # 感兴趣区域
-    x_stride=2,             # X方向跳像素 (加速)
-    y_stride=1,             # Y方向跳像素
+    roi=(x, y, w, h),       # 感兴趣区域；800x480 实机必须给 ROI
+    x_stride=5,             # 800x480 推荐 5~8；小图/QVGA 可用 2
+    y_stride=5,             # 不要默认 y_stride=1，否则高分辨率会明显掉帧
     area_threshold=10,      # 最小边界框面积
     pixels_threshold=10,    # 最小像素数
-    merge=True,             # 合并相邻色块
-    margin=5                # 合并边距
+    merge=False,            # 实时识别默认不合并；靠近目标用 True 时必须调 margin
+    margin=0                # merge=False 时保持 0
 )
 
 # blob 对象属性:
@@ -3096,20 +3100,95 @@ blobs = img.find_blobs(
 # 红色:  (30, 100,  15, 127,  15, 127)
 # 绿色:  (30, 100, -64,  -8,  50,  70)
 # 蓝色:  ( 0,  40,   0,  90,-128, -20)
+
+# ═══════════════════════════════════════════════════════════════
+# 一键 LAB 自动校准 (✅ 实机稳定验证, 2025-05-22)
+# ═══════════════════════════════════════════════════════════════
+# 原理: ROI 拷贝 → get_statistics() → RGB565 均值 → 颜色预设 → LAB阈值
+# ⚠️ to_lab() / get_pixel() 在部分固件上不可用，此方法稳定兼容
+COLOR_PRESETS = {
+    "red":    {"a_lo": 15, "a_hi": 127, "b_lo":  10, "b_hi": 127},
+    "green":  {"a_lo":-128,"a_hi":  -8, "b_lo":-128, "b_hi": 127},
+    "blue":   {"a_lo":-128,"a_hi": 127, "b_lo":-128, "b_hi": -20},
+    "yellow": {"a_lo":-128,"a_hi": 127, "b_lo": 15,  "b_hi": 127},
+    "orange": {"a_lo": 15, "a_hi": 127, "b_lo": 15,  "b_hi": 127},
+    "purple": {"a_lo": 15, "a_hi": 127, "b_lo":-128, "b_hi": -20},
+    "white":  {"a_lo":-128,"a_hi": 127, "b_lo":-128, "b_hi": 127},
+    "black":  {"a_lo":-128,"a_hi": 127, "b_lo":-128, "b_hi": 127},
+}
+# 颜色判定条件 (按顺序匹配, 首命中即停):
+# red:    R_mean > G_mean+25 and R_mean > B_mean+25
+# green:  G_mean > R_mean+25 and G_mean > B_mean+25
+# blue:   B_mean > R_mean+25 and B_mean > G_mean+25
+# yellow: R_mean > 140 and G_mean > 110 and B_mean < 90
+# orange: R_mean > 160 and 60<G_mean<140 and B_mean < 80
+# purple: R_mean > 100 and B_mean > 100 and G_mean < 80
+# white:  R_mean>180 and G_mean>180 and B_mean>180
+# black:  R_mean<60 and G_mean<60 and B_mean<60
+# 否则默认宽泛: A=(-128,127), B=(-128,127)
+
+def auto_calibrate(img, view_w=680, ph=480):
+    """一键 LAB 校准: 采视图中心 60x45 → RGB565统计 → 颜色预设 → LAB阈值"""
+    cx, cy = view_w // 2, ph // 2
+    rw, rh = 60, 45
+    rx = max(0, cx - rw // 2); ry = max(0, cy - rh // 2)
+    rw = min(rw, view_w - rx); rh = min(rh, ph - ry)
+
+    roi = img.copy(roi=(rx, ry, rw, rh))
+    if roi is None: return None
+
+    s = roi.get_statistics()
+    del roi
+    rm, gm, bm = s[0], s[6], s[12]       # RGB mean
+    rmx, gmx, bmx = s[5], s[11], s[17]   # RGB max
+    rmn, gmn, bmn = s[4], s[10], s[16]   # RGB min
+
+    L_lo = max(0,   int((rmn+gmn+bmn)/3 * 0.65))
+    L_hi = min(100, int((rmx+gmx+bmx)/3 * 1.35))
+    if L_hi - L_lo < 15: L_lo, L_hi = max(0,L_lo-8), min(100,L_hi+8)
+
+    A_lo, A_hi = -128, 127  # 默认宽泛
+    B_lo, B_hi = -128, 127
+
+    # 按预设表顺序匹配 (first match wins)
+    tests = [
+        ("red",    rm>gm+25 and rm>bm+25),
+        ("green",  gm>rm+25 and gm>bm+25),
+        ("blue",   bm>rm+25 and bm>gm+25),
+        ("yellow", rm>140 and gm>110 and bm<90),
+        ("orange", rm>160 and 60<gm<140 and bm<80),
+        ("purple", rm>100 and bm>100 and gm<80),
+        ("white",  rm>180 and gm>180 and bm>180),
+        ("black",  rm<60 and gm<60 and bm<60),
+    ]
+    for name, matched in tests:
+        if matched:
+            A_lo, A_hi = COLOR_PRESETS[name]["a_lo"], COLOR_PRESETS[name]["a_hi"]
+            B_lo, B_hi = COLOR_PRESETS[name]["b_lo"], COLOR_PRESETS[name]["b_hi"]
+            break
+
+    return [(L_lo, L_hi, A_lo, A_hi, B_lo, B_hi)]
+
+# 800x480 帧率经验:
+# 1) 检测 ROI 排除菜单栏/无关区域。
+# 2) 用 x_stride/y_stride=5~8。
+# 3) 隔帧检测 DETECT_EVERY=2~3，非检测帧复用上次结果。
+# 4) merge=True 会额外耗时且可能把相邻目标合并，默认关闭。
 ```
 
 **特征检测：**
 
 ```python
 # 矩形检测 — AprilTag 四边形算法
-rects = img.find_rects(roi=None, threshold=10000)
+# ⚠️ find_rects 比 find_blobs 重。800x480 必须给 ROI，避免全帧连续跑。
+rects = img.find_rects(roi=(x, y, w, h), threshold=10000)
 # threshold: 越低检出越多 (推荐 4000~15000)
 # rect.corners() → [(x0,y0),(x1,y1),(x2,y2),(x3,y3)] 顺时针从左上
 # rect.rect()   → (x, y, w, h)
 
 # 圆形检测 — 霍夫变换
 circles = img.find_circles(
-    roi=None, x_stride=2, y_stride=1,
+    roi=(x, y, w, h), x_stride=4, y_stride=4,
     threshold=2000,         # 仅返回>=此值的大圆
     x_margin=10, y_margin=10, r_margin=10  # 合并相近圆
 )
@@ -3148,10 +3227,11 @@ img.draw_string_advanced(x, y, size, text, color)
 | HD (1280×720) | 92万 | ~30fps | 5~10fps | YOLO 推理输入 |
 
 **铁律**：
-1. **默认 320×240**，除非精度不够再升
-2. **严禁高斯模糊等重滤镜**在低帧率下叠加 — 先降分辨率再考虑滤镜
-3. Display 虚拟屏尺寸**独立于采集分辨率**，可以用 640×480 显示但只采集 320×240
-4. 25E 靶面检测 320×240 完全足够：50cm 靶面 / 320px = 1.56mm/px
+1. **脱机 ST7701 触摸屏优先 800×480 直出**：摄像头帧=屏幕帧，`Display.show_image(img)` 单次刷新最稳。
+2. **不要把小图软件放大到 800×480**：CanMV v1.2.2 实测 `img.copy(x_scale=...)` / `img.resize(800,480)` 易报 `Image size is too large`，并可能造成花屏/闪烁。
+3. 视觉检测不要全帧重算法：在 800×480 图上用 `roi=(0,0,VIEW_W,VIEW_H)` + `x_stride/y_stride`，菜单栏不参与检测。
+4. **严禁高斯模糊等重滤镜**在低帧率下叠加；颜色/形状识别优先用 `find_blobs`、ROI、跳采样和阈值校准。
+5. IDE 虚拟屏/纯算法调试可用 QVGA/VGA；实机触摸 UI 以 800×480 直出模板为准。
 
 ### ⚠️ K230 代码生成铁律 (防幻觉)
 
@@ -3162,15 +3242,20 @@ img.draw_string_advanced(x, y, size, text, color)
    - **无 bind_layer 模式**: set_framesize → set_pixformat → Display.init → MediaManager.init → sensor.run
    - **有 bind_layer 模式**: set_framesize → set_pixformat → bind_layer → Display.init → MediaManager.init → sensor.run
 4. 主循环首行必须是 `os.exitpoint()`
-5. 抓帧必须是 `sensor.snapshot(chn=CAM_CHN_ID_0)`
-6. 禁止编造不存在的 API (如 `sensor.reset()` 不存在，正确是 `sensor = Sensor(...); sensor.reset()`)
-7. **MIPI 屏用 `Display.init(Display.ST7701, width=800, height=480, to_ide=True)`**, 不是 `SPI_LCD` — SPI_LCD 仅用于 SPI 小屏
+5. 抓帧优先使用 `sensor.snapshot()` 默认通道；只有多通道/bind_layer 模式确认可用时才显式传 `chn=CAM_CHN_ID_0`
+6. `sensor.reset()` 必须在 `sensor = Sensor(...)` 构造之后调用；不要写裸模块式 `sensor.reset()`
+7. **MIPI 屏用 `Display.init(Display.ST7701, width=800, height=480)`**, 不是 `SPI_LCD` — SPI_LCD 仅用于 SPI 小屏；联机调试需要 IDE 同步画面时才加 `to_ide=True`，脱机追求帧率时不要加
 8. 触摸屏用 `from machine import TOUCH; tp = TOUCH(0)`, **不是裸 I2C 读寄存器**
 9. **`image.Image` 画布尺寸必须与屏幕一致** — 触摸坐标是屏幕像素坐标，画布不同则坐标错位
 10. **f-string 慎用** — MicroPython 不支持格式说明符 (如 `f"{x:>3}"`), 用 `%` 格式化
 11. **`SPI_LCD.ST7789` 常量不存在** — 用整数 `type=0` 代替
 12. **GC2093 分辨率**: QVGA(320x240)/VGA(640x480)/HD(1280x720). **800x480 在 LCKFB 固件上实测可用**(匹配 ST7701 LCD 同尺寸, 零缩放)
 13. **层常量**: `Display.LAYER_VIDEO1`/`Display.LAYER_OSD0` 不是裸 `LAYER_VIDEO1`/`LAYER_OSD0`
+14. **实机触摸 UI 不要分两次刷新**：摄像头画面和菜单必须画到同一张 `img` 后只调用一次 `Display.show_image(img)`，否则 ST7701 容易花屏/闪烁。
+15. **全屏显示经验**：若画面只有一小块，通常是小图放大失败并回退 1x；稳定方案是 `sensor.set_framesize(width=800,height=480)` + `Display.show_image(img)` 零缩放。
+16. **形状识别经验**：矩形/三角/圆形的低成本方案是 `find_blobs` 后用外接框填充率分类：三角约 0.5，圆约 0.78，矩形接近 1.0；适合实心同色图形，空心边框需另用边缘/轮廓方案。
+17. **帧率优化经验**：800×480 全屏直出时，低帧率通常来自每帧 `find_blobs` 的 LAB 阈值扫描、`draw_string_advanced` 文本绘制、菜单区清屏、串口打印和频繁 `gc.collect()`。实机优化优先级：`DETECT_EVERY=2~3` 隔帧检测、`x_stride/y_stride=5~8`、限制 `MAX_TARGETS`、串口 1~2 秒打印一次、GC 30 帧以上一次。
+18. **脱机间歇卡顿经验**：若运行流畅但每 1~2 秒卡一下，优先检查周期 `print()` 和 `gc.collect()`。实测关闭周期状态打印 (`STATUS_PRINT_MS=0`) 并把 GC 拉长到约 300 帧后卡顿消失；只在启动、模式切换、CAL 校准、异常时打印。
 
 ### ✅ K230 已验证代码模板
 
@@ -3182,42 +3267,69 @@ img.draw_string_advanced(x, y, size, text, color)
 """
 K230 MIPI 触摸屏模板 (已验证) — 800x480 全屏显示 + 检测 + 触摸UI
 适用: 庐山派 + GC2093 + ST7701 3.1寸触摸屏, 脱机运行
-关键: 摄像头分辨率=屏幕分辨率(800x480), 零缩放, Display.show_image 直出
+关键: 摄像头分辨率=屏幕分辨率(800x480), 零缩放, Display.show_image 单次直出
 """
 from media.sensor import *
 from media.display import *
 from media.media import *
 import image, time, os, gc
 
-SW, SH = 800, 480  # 屏幕=摄像头分辨率, 零缩放
+PW, PH = 800, 480
+VIEW_W = 680       # 左侧视觉区域
+MENU_X = VIEW_W    # 右侧触摸菜单栏起点
 
 sensor = Sensor(id=2)                          # 庐山派 CSI 2
 sensor.reset()
-sensor.set_framesize(width=SW, height=SH)      # 800x480 = LCD 同尺寸
+sensor.set_framesize(width=PW, height=PH)
 sensor.set_pixformat(Sensor.RGB565)
 sensor.set_hmirror(False)
 sensor.set_vflip(False)
 
-Display.init(Display.ST7701, width=SW, height=SH, to_ide=True)
+# 脱机运行追求帧率: 不加 to_ide=True；联机调试需要 IDE 画面时再加。
+Display.init(Display.ST7701, width=PW, height=PH)
 MediaManager.init()
 sensor.run()
 
+threshold = [(42, 92, -24, 26, -33, 17)]       # 必须现场 CAL 校准
+DETECT_EVERY = 2                                # 800x480 上隔帧检测可明显提帧率
+STATUS_PRINT_MS = 0                             # 脱机默认关闭周期打印，避免 1~2 秒卡顿
+GC_EVERY_FRAMES = 300                           # 低频 GC；内存紧张再缩短
 clock = time.clock(); fc = 0
+last_blobs = []
 
 while True:
     os.exitpoint()
     clock.tick(); fc += 1
 
-    img = sensor.snapshot(chn=CAM_CHN_ID_0)  # 800x480 图像
+    img = sensor.snapshot()
 
-    # --- 检测 + UI 绘制 (直接画在 img 上) ---
-    # img.draw_rectangle(...) / img.draw_cross(...) / img.draw_string_advanced(...)
+    # 检测只跑左侧 ROI，右侧菜单栏不参与识别；stride 降低 800x480 的计算压力。
+    if fc % DETECT_EVERY == 0:
+        last_blobs = img.find_blobs(threshold, roi=(0, 0, VIEW_W, PH),
+                                    x_stride=5, y_stride=5,
+                                    pixels_threshold=80, area_threshold=120,
+                                    merge=False, margin=0)
+    if last_blobs:
+        b = max(last_blobs, key=lambda x: x.pixels())
+        img.draw_rectangle(b.x(), b.y(), b.w(), b.h(), color=(0, 255, 0), thickness=2)
+        img.draw_cross(b.cx(), b.cy(), color=(0, 255, 0), size=12)
 
-    Display.show_image(img)  # 800x480 → 800x480, 零缩放
+    # 右侧菜单必须画在同一张 img 上，避免分两次 show_image 导致 ST7701 花屏闪烁。
+    try:
+        img.draw_rectangle(MENU_X, 0, PW - MENU_X, PH, color=(0, 0, 0), fill=True)
+    except Exception:
+        for x in range(MENU_X, PW):
+            img.draw_line(x, 0, x, PH - 1, color=(0, 0, 0))
+    img.draw_string_advanced(MENU_X + 8, 24, 18, "CAL", color=(0, 120, 255))
+    img.draw_string_advanced(MENU_X + 8, 70, 18, "ALL", color=(0, 255, 0))
 
-    if fc % 200 == 0:
+    Display.show_image(img)   # 800x480 → ST7701 800x480, 单次直出
+
+    if fc % GC_EVERY_FRAMES == 0:
         gc.collect()
 ```
+
+完整实机例程见：`examples/k230_shape_detect_touch_cal.py`
 
 #### 模板 B: IDE VIRT 虚拟屏 (调试开发)
 
@@ -3245,7 +3357,7 @@ clock = time.clock(); fc = 0
 while True:
     os.exitpoint()
     clock.tick(); fc += 1
-    img = sensor.snapshot(chn=CAM_CHN_ID_0)
+    img = sensor.snapshot()
     # 检测/绘制...
     Display.show_image(img)
     if fc % 300 == 0: gc.collect()
@@ -3352,8 +3464,8 @@ from media.display import *
 from media.media import *
 import os
 
-# GC2093: 1920×1080, OV5647: 2592×1944. 不要传 id=0 参数!
-sensor = Sensor(width=1920, height=1080)
+# 庐山派 GC2093 物理板优先用 CSI2: Sensor(id=2)。IDE 虚拟调试才考虑 width/height 构造。
+sensor = Sensor(id=2)
 sensor.reset()
 # 电赛默认 QVGA 320×240 → 高帧率优先!
 # 需要精度时改为 width=640, height=480
@@ -3372,7 +3484,7 @@ sensor.run()
 # 主循环中必须 os.exitpoint() 允许 IDE 中断
 while True:
     os.exitpoint()
-    img = sensor.snapshot(chn=CAM_CHN_ID_0)   # 捕获一帧 → Image
+    img = sensor.snapshot()                   # 捕获一帧 → Image
     Display.show_image(img)                    # 推送到 IDE (自动缩放)
 
 # 退出清理
@@ -3508,6 +3620,34 @@ pl.destroy()
 | 35 | **GC2093 800x480** | LCKFB 固件上 GC2093 **实测支持** `set_framesize(800,480)`, 匹配 ST7701 LCD 零缩放. 此前的"非标准分辨率"警告对 LCKFB 固件不适用 |
 | 36 | **双通道限制** | GC2093 双通道 (CH0 显示+CH1 检测) 在 CanMV v1.2.2 上 `snapshot chn(1) failed(3)`. **用单通道 800x480 即可** |
 | 37 | **MIPI屏直出模式** | 最简可靠架构: 单通道 800x480 RGB565 → snapshot → 检测+UI绘制 → `Display.show_image(img)` 直出. 无需 bind_layer/OSD层/双通道 |
+| 38 | **软件放大失败** | 小图用 `img.copy(x_scale=4,y_scale=4)` / `img.resize(800,480)` 在 CanMV v1.2.2 实测可能报 `Image size is too large`。不要依赖软件放大全屏 |
+| 39 | **分块刷新花屏** | 一帧里先 `Display.show_image(视频)` 再 `Display.show_image(菜单画布)` 会导致 ST7701 花屏/闪烁。菜单必须画进同一张 `img` 后单次刷新 |
+| 40 | **800x480识别压力** | 全屏帧运行 `find_blobs/find_rects` 需加 ROI、`x_stride/y_stride` 和隔帧检测。推荐 `roi=(0,0,VIEW_W,480), x_stride=5, y_stride=5, DETECT_EVERY=2`，右侧菜单栏排除 |
+| 41 | **例程帧率低/周期卡顿** | 主要耗时不是 `snapshot`，而是 800×480 上每帧 LAB `find_blobs` + 文本/菜单绘制 + 周期 `print()` + 频繁 GC。推荐隔帧检测、stride 5~8、限制目标数、脱机关闭周期打印、GC 拉长到约 300 帧 |
+| 42 | **`img.to_lab()` 不存在** | 部分 CanMV K230 固件版本 Image 对象没有 `to_lab()` 方法, 报 `'Image' object has no attribute 'to_lab'`。**稳定替代**: `img.copy(roi=...).get_statistics()` 获取 RGB565 均值(0~255), 再用颜色预设表推断 LAB 阈值 |
+| 43 | **`img.get_pixel()` 可能不可用** | 部分固件版本没有 `get_pixel(x,y)`。不要依赖逐像素采样; 用 ROI `copy()` + `get_statistics()` 统计整体特征是稳定方案 |
+
+---
+
+### K230 例程帧率审查清单
+
+审查或生成 K230 视觉例程时，凡是出现以下写法，都必须主动改正或标注风险：
+
+| 高风险写法 | 后果 | 推荐改法 |
+|-----------|------|----------|
+| `find_blobs(..., roi=None)` 或不传 ROI | 800×480 全帧 LAB 扫描，帧率明显下降 | 指定 ROI，排除菜单栏和无关区域 |
+| `x_stride=1/2, y_stride=1` | 采样点过多 | 800×480 用 `x_stride/y_stride=5~8` |
+| 每帧 `find_rects/find_circles/find_apriltags` | 这些算法比 blob 重很多 | 隔帧/低频运行，且必须 ROI |
+| `merge=True` 默认开启 | 合并计算耗时，且相邻目标易误合并 | 实时识别默认 `merge=False, margin=0` |
+| 每帧 `draw_string_advanced` 大字号多行文本 | UI 绘制耗时 | 菜单文字尽量少，状态文本低频更新 |
+| 每帧 `uart.write()` | 串口阻塞或排队 | 20~100ms 限频发送 |
+| 每帧 `gc.collect()` | 帧间隔抖动 | 1s 一次或 30~200 帧一次 |
+| 每 1~2 秒周期 `print()` | 脱机运行也可能造成明显间歇卡顿 | 脱机默认 `STATUS_PRINT_MS=0`，只在事件/异常时打印 |
+| 过于频繁 GC | 周期性卡顿 | 稳定例程可用 `GC_EVERY_FRAMES=300`，内存紧张再缩短 |
+| 分两次 `Display.show_image()` 刷视频和菜单 | ST7701 花屏/闪烁 | 所有 UI 画到同一张 `img`，单次 `Display.show_image(img)` |
+| 脱机运行仍写 `to_ide=True` | 可能额外向 IDE 推流，降低帧率 | 脱机用 `Display.init(Display.ST7701, width=800, height=480)` |
+
+> 经验结论：800×480 ST7701 直出可流畅，但必须把“检测频率”和“显示频率”解耦。显示可以每帧，检测建议 `DETECT_EVERY=2~3`，非检测帧复用上次结果。
 
 ---
 
@@ -3571,10 +3711,10 @@ fpioa.set_function(11, FPIOA.UART2_TXD)
 fpioa.set_function(12, FPIOA.UART2_RXD)
 uart = UART(UART.UART2, baudrate=115200)
 
-# 摄像头: GC2093=1920×1080, 不要传 id=0
-sensor = Sensor(width=1920, height=1080)
+# 摄像头: 庐山派 GC2093 物理板用 Sensor(id=2)，不要传 id=0
+sensor = Sensor(id=2)
 sensor.reset()
-sensor.set_framesize(width=640, height=480)  # 先设尺寸
+sensor.set_framesize(width=240, height=176)  # 先设尺寸，8像素对齐并降低帧缓冲压力
 sensor.set_pixformat(Sensor.RGB565)           # 再设格式
 Display.init(Display.VIRT, width=640, height=480, to_ide=True)
 MediaManager.init()
@@ -3585,18 +3725,24 @@ sensor.run()
 RED_THRESHOLD   = [(30, 100, 15, 127, 0, 127)]
 GREEN_THRESHOLD = [(30, 100, -128, -15, 0, 127)]
 
-def pixel_to_screen(px, py, img_w=640, img_h=480, screen_w=50, screen_h=50):
+def pixel_to_screen(px, py, img_w=240, img_h=176, screen_w=50, screen_h=50):
     """像素坐标 → 屏幕坐标(cm), 原点屏幕中心"""
     return ((px - img_w/2) * screen_w / img_w,
             (py - img_h/2) * screen_h / img_h)
 
+last_gc_ms = time.ticks_ms()
+
 while True:
     os.exitpoint()  # 允许 IDE Ctrl+C 中断
-    img = sensor.snapshot(chn=CAM_CHN_ID_0)
-    blobs = img.find_blobs(RED_THRESHOLD, pixels_threshold=5,
-                           area_threshold=10, merge=True)
+    img = sensor.snapshot()
+    blobs = img.find_blobs(RED_THRESHOLD,
+                           roi=(0, 0, 240, 176),
+                           x_stride=3, y_stride=3,
+                           pixels_threshold=5,
+                           area_threshold=10,
+                           merge=False, margin=0)
     if blobs:
-        b = blobs[0]
+        b = max(blobs, key=lambda x: x.pixels())
         img.draw_cross(b.cx(), b.cy(), color=(0,255,0), size=10)
         sx, sy = pixel_to_screen(b.cx(), b.cy())
         # UART 发给 M0G
@@ -3607,7 +3753,10 @@ while True:
         struct.pack_into('<h', buf, 7, len(blobs))
         buf[9] = sum(buf[:9]) & 0xFF ^ 0xFF
         uart.write(buf)
-    gc.collect()
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_gc_ms) > 1000:
+        last_gc_ms = now
+        gc.collect()
 ```
 
 ### 双芯通信帧协议 (10字节定长)
@@ -3704,9 +3853,11 @@ class VisionPipeline:
     def __init__(self, mode="blob_red"):
         self.mode = mode
         # 标准初始化顺序
-        self.sensor = Sensor(width=1920, height=1080)
+        self.img_w = 240
+        self.img_h = 176
+        self.sensor = Sensor(id=2)
         self.sensor.reset()
-        self.sensor.set_framesize(width=640, height=480)
+        self.sensor.set_framesize(width=self.img_w, height=self.img_h)
         self.sensor.set_pixformat(Sensor.RGB565)
         Display.init(Display.VIRT, width=640, height=480, to_ide=True)
         MediaManager.init()
@@ -3714,9 +3865,13 @@ class VisionPipeline:
         self.uart = UART(UART.UART2, baudrate=115200)
         self.clock = time.clock()
         self.last_blob = None
+        self.last_send_ms = 0
+        self.last_gc_ms = time.ticks_ms()
+        self.fc = 0
 
     def pixel_to_cm(self, px, py):
-        return ((px-160)*50/320, (py-120)*50/240)
+        return ((px - self.img_w / 2) * 50 / self.img_w,
+                (py - self.img_h / 2) * 50 / self.img_h)
 
     def send(self, cmd, x, y, extra=0):
         buf = bytearray(10)
@@ -3729,18 +3884,30 @@ class VisionPipeline:
 
     def run_blob_red(self, img):
         blobs = img.find_blobs([(30,100,15,127,0,127)],
-                               pixels_threshold=5, merge=True)
+                               roi=(0, 0, self.img_w, self.img_h),
+                               x_stride=3, y_stride=3,
+                               pixels_threshold=5,
+                               area_threshold=10,
+                               merge=False, margin=0)
         if blobs:
-            b = blobs[0]
+            b = max(blobs, key=lambda x: x.pixels())
             img.draw_cross(b.cx(), b.cy(), size=10)
             sx, sy = self.pixel_to_cm(b.cx(), b.cy())
-            self.send(0x01, sx, sy, len(blobs))
+            now = time.ticks_ms()
+            if time.ticks_diff(now, self.last_send_ms) > 20:
+                self.last_send_ms = now
+                self.send(0x01, sx, sy, len(blobs))
             self.last_blob = (b.cx(), b.cy())
         else:
-            self.send(0x04, 0, 0, 0)  # lost
+            now = time.ticks_ms()
+            if time.ticks_diff(now, self.last_send_ms) > 100:
+                self.last_send_ms = now
+                self.send(0x04, 0, 0, 0)  # lost
 
     def run_circles(self, img):
-        circles = img.find_circles(threshold=1800, r_min=5, r_max=35)
+        circles = img.find_circles(roi=(0, 0, self.img_w, self.img_h),
+                                   x_stride=4, y_stride=4,
+                                   threshold=1800, r_min=5, r_max=35)
         if circles:
             c = circles[0]
             img.draw_circle(c.x(), c.y(), c.r(), color=(255,0,0))
@@ -3748,6 +3915,7 @@ class VisionPipeline:
             self.send(0x02, sx, sy, c.r())
 
     def run_apriltag(self, img):
+        # AprilTag 很重，建议只在定位模式低频运行，或降低分辨率。
         tags = img.find_apriltags(families=image.TAG36H11)
         for t in tags:
             img.draw_rectangle(t.rect())
@@ -3758,14 +3926,17 @@ class VisionPipeline:
         while True:
             os.exitpoint()
             self.clock.tick()
-            img = self.sensor.snapshot(chn=CAM_CHN_ID_0)
+            self.fc += 1
+            img = self.sensor.snapshot()
             if self.mode == "blob_red":
                 self.run_blob_red(img)
-            elif self.mode == "circles":
+            elif self.mode == "circles" and self.fc % 2 == 0:
                 self.run_circles(img)
-            elif self.mode == "apriltag":
+            elif self.mode == "apriltag" and self.fc % 5 == 0:
                 self.run_apriltag(img)
-            if self.clock.fps() > 50:
+            now = time.ticks_ms()
+            if time.ticks_diff(now, self.last_gc_ms) > 1000:
+                self.last_gc_ms = now
                 gc.collect()
 
 # 启动
@@ -3779,6 +3950,7 @@ vp.loop()
 |--------|------|------|
 | QVGA (320x240) | 90fps | 光斑追踪 |
 | VGA (640x480) | 30fps | 靶心检测 |
+| ST7701直出 (800x480) | 实测流畅 | 触摸 UI + ROI/stride 颜色形状识别；不要全帧重算法 |
 | HD (1280x720) | 30fps | YOLO推理输入 |
 
 ### 视觉方案选择决策树
@@ -3804,12 +3976,13 @@ vp.loop()
 |---|------|------|
 | 1 | **LAB阈值不准** | 必须在场地灯光下重校准, 自然光/日光灯/LED 差异巨大 |
 | 2 | **QVGA够用** | 追踪不需要高分辨率, QVGA 90fps 远好于 VGA 30fps |
-| 3 | **GC导致帧间隔抖动** | `if fps>50: gc.collect()`, 避免每帧都 GC |
+| 3 | **GC导致帧间隔抖动** | 固定低频 GC，例如每 30~200 帧一次；不要用 `if fps>50` 这种随帧率抖动的条件 |
 | 4 | **uart.write阻塞** | 10字节帧协议, 115200波特率 ≈ 1ms发送, 不阻塞 |
 | 5 | **blob合并误判** | 设 `merge=True` 时注意 `margin` 参数, 两光斑靠近时可能合并 |
-| 6 | **MMZ内存耗尽** | 大Image用 `alloc=image.ALLOC_MMZ`, 用完 `del` |
-| 7 | **Sensor未stop** | 多 Sensor 每个都要单独 stop |
-| 8 | **Display bind_layer顺序** | 必须先 bind_layer 再 init |
+| 6 | **800x480形状识别帧率低** | 不要每帧跑全量检测；用 ROI、`x_stride/y_stride=5~8`、`DETECT_EVERY=2~3`、限制目标数 |
+| 7 | **MMZ内存耗尽** | 大Image用 `alloc=image.ALLOC_MMZ`, 用完 `del` |
+| 8 | **Sensor未stop** | 多 Sensor 每个都要单独 stop |
+| 9 | **Display bind_layer顺序** | 必须先 bind_layer 再 init |
 
 ---
 
@@ -4754,9 +4927,9 @@ typedef struct {
 } QuadrantSensor;
 
 Point2D quadrant_to_position(QuadrantSensor *q) {
-    float total = q->tl + q->tr + q->bl + q->br + 1;
-    float x = ((q->tr + q->br) - (q->tl + q->bl)) / total * 25.0f;
-    float y = ((q->bl + q->br) - (q->tl + q->tr)) / total * 25.0f;
+    float total = q->top_left + q->top_right + q->bot_left + q->bot_right + 1;
+    float x = ((q->top_right + q->bot_right) - (q->top_left + q->bot_left)) / total * 25.0f;
+    float y = ((q->bot_left + q->bot_right) - (q->top_left + q->top_right)) / total * 25.0f;
     return (Point2D){x, y};
 }
 ```
@@ -4975,4 +5148,3 @@ void green_main(void) {
 - 双 K230+M0G 系统必须共地，供电独立隔离
 
 ---
-
