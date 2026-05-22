@@ -86,3 +86,38 @@ cp mspm0g-contest-skill/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 | TB6612 电机 | Documents/model/TB6612_Verified/ | ✅ |
 | 编码器轮询 | Documents/model/Encoder_Poll/ | ✅ |
 | OLED I2C | workspace_ccstheia/test_1/ | ✅ |
+
+## 2026-05 Verified K230 -> MSPM0G Gimbal UART Path
+
+Use this as the current known-good wiring and debug recipe for the K230 vision
+tracker driving the MSPM0G3507 two-axis gimbal:
+
+| Link | Verified value |
+| --- | --- |
+| K230 TX | 40-pin header pin 8, GPIO3, UART1_TXD |
+| MSPM0G RX | PB3, UART3_RX |
+| Ground | K230 GND to MSPM0G GND |
+| Baud | 9600 8N1 |
+| Frame | `FF FE pan tilt 00 00 00 BCC` |
+| BCC | XOR of bytes 0..6 |
+
+Important lessons:
+
+- `PB3` is RX in the MSPM0G SysConfig; `PB2` is TX.
+- Do not confuse K230 GPIO numbers with 40-pin header numbers. Header pin 8 is
+  GPIO3/UART1_TXD in the verified jumper-wire setup.
+- 115200 caused intermittent `HEAD/FRAME` hits and BCC errors with the current
+  wiring. Use 9600 first, then raise baud only after the link is stable.
+- Use OLED debug on MSPM0G when XDS110/user UART gets hot or inconvenient.
+  Normal OLED debug should show `HEAD` and `FRAME` increasing continuously and
+  `RAW` repeatedly containing `FF FE`.
+- Run `workspace_ccstheia/test_2/k230_uart_all_test.py` before the vision
+  tracker. It transmits unique pan values on UART1/2/3/4 so the OLED `P:` field
+  identifies the physical TX pin.
+
+Current example files:
+
+- `workspace_ccstheia/test_2/k230_uart_all_test.py`
+- `workspace_ccstheia/test_2/k230_wheeltec_track.py`
+- `workspace_ccstheia/servo_test/main.c`
+- `workspace_ccstheia/servo_test/empty.syscfg`

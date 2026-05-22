@@ -103,3 +103,52 @@ C:\Users\Administrator\workspace_ccstheia\test_2\Debug\test_2.out
   move the encoder readers to timer capture/QEI-style hardware support.
 - OLED is the primary runtime monitor in this MPU build because PA10/PA11 are
   occupied by I2C1 instead of UART0.
+
+## K230 -> MSPM0G Gimbal UART Bring-up (Verified 2026-05-23)
+
+This project now keeps the K230/MSPM0G UART lessons from the gimbal tracking
+bring-up. The stable jumper-wire setup is:
+
+| Signal | Connection |
+| --- | --- |
+| K230 TX | 40-pin header pin 8, GPIO3, UART1_TXD |
+| MSPM0G RX | PB3, UART3_RX |
+| Ground | K230 GND to MSPM0G GND |
+| Baud | 9600 8N1 |
+| Frame | `FF FE pan tilt 00 00 00 BCC` |
+| BCC | XOR of bytes 0..6 |
+
+Do not confuse K230 GPIO numbers with 40-pin header numbers. Header pin 8 is
+GPIO3. Header pin 11 is GPIO5. The GH1.25 connector marked `2` uses GPIO11/12,
+but it requires the locked cable and was not used in this jumper-wire setup.
+
+### Debug sequence
+
+1. Flash the MSPM0G `servo_test` OLED debug firmware.
+2. Run `k230_uart_all_test.py` on K230 before running vision tracking.
+3. Move the K230 TX jumper among candidate header pins if needed.
+4. Confirm OLED `HEAD` and `FRAME` continuously increase and OLED `RAW` shows
+   repeating `FF FE ...`.
+5. Only then run `k230_wheeltec_track.py`.
+
+`k230_uart_all_test.py` sends unique pan values so OLED `P:` identifies the
+physical TX line:
+
+| K230 UART | 40-pin header | GPIO | Expected OLED `P:` |
+| --- | --- | --- | --- |
+| UART1 TX | pin 8 | GPIO3 | 111 |
+| UART2 TX | pin 11 | GPIO5 | 122 |
+| UART3 TX | pin 37 | GPIO32 | 133 |
+| UART4 TX | pin 29 | GPIO36 | 144 |
+
+### Mistakes found during bring-up
+
+- PB3 was mistakenly suspected as TX; in this SysConfig it is RX. PB2 is TX.
+- 115200 baud produced intermittent headers and BCC errors with the jumper-wire
+  setup. 9600 is the current verified baud.
+- Vision tracking was debugged too early. Fixed UART frames must be stable before
+  tuning LAB thresholds or servo gains.
+- One-byte `pan` values must stay <=255. The current tracker clamps to a smaller
+  safe gimbal range.
+- Direct pixel-to-absolute-servo mapping can cause hard 180-degree jumps. The
+  tracker now uses incremental steps, a deadband, and limited angle range.

@@ -10,6 +10,66 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 ---
 
+## 2026-05 K230 -> MSPM0G UART/Gimbal Bring-up Lessons
+
+Use this section first when debugging the K230 vision board sending target data to MSPM0G for servo/gimbal tracking.
+
+Verified hardware path:
+
+- K230 TX: 40-pin header pin 8, GPIO3, UART1_TXD.
+- MSPM0G RX: PB3, configured as the K230 UART RX input. PB2 is TX only if MSPM0G needs to reply.
+- Common GND is mandatory. Do not power the servo from weak debug/USB rails.
+- Stable serial setting: 9600 baud, 8N1. 115200 produced intermittent `HEAD`, `FRAME`, and `BCC` errors in this setup.
+
+Verified protocol:
+
+- Frame is 8 bytes: `FF FE pan tilt 00 00 00 bcc`.
+- `bcc` is XOR of bytes 0..6.
+- Known-good test frame for UART1 pin 8: `FF FE 6F 5A 00 00 00 34` (`pan=111`, `tilt=90`).
+- Use bounded incremental servo commands, not raw pixel-to-absolute-angle jumps. A direct absolute map caused the servo to swing about 180 degrees after target detection.
+
+K230 CanMV API pattern:
+
+```python
+from machine import UART, FPIOA
+
+fpioa = FPIOA()
+fpioa.set_function(3, FPIOA.UART1_TXD)
+fpioa.set_function(4, FPIOA.UART1_RXD)
+uart = UART(UART.UART1, baudrate=9600, bits=UART.EIGHTBITS,
+            parity=UART.PARITY_NONE, stop=UART.STOPBITS_ONE)
+uart.write(bytes([0xFF, 0xFE, pan & 0xFF, tilt & 0xFF, 0, 0, 0, bcc]))
+```
+
+Pin/API traps that caused real debug time loss:
+
+- MSPM0G `PB3` is RX for this link, not TX. K230 TX must enter MSPM0G RX.
+- K230 header pin numbers are not GPIO numbers. Header pin 8 is GPIO3/UART1_TXD.
+- The GH1.25 locked UART2 connector uses GPIO11/GPIO12, but the 40-pin header pin 11 uses GPIO5. Do not mix these tables.
+- If MSPM0G RX count increases but OLED raw bytes never show `FF FE`, suspect wrong K230 pin, wrong UART instance, no common GND, or baud mismatch before changing parser logic.
+- XDS110 serial observation can heat up during long debug; OLED debug is safer for field bring-up.
+
+Recommended OLED debug fields on MSPM0G:
+
+- `RX`: total received UART bytes.
+- `HEAD`: count of `FF FE` header detections.
+- `FRAME`: count of complete 8-byte frames.
+- `OK`: frames with valid BCC.
+- `ERR/BCC`: checksum or parser errors.
+- `R:` last raw bytes, used to confirm whether `FF FE` is physically arriving.
+- `ST`: parser state.
+
+All-port K230 isolation test values:
+
+| K230 output | Expected frame |
+|-------------|----------------|
+| UART1, header pin 8, GPIO3 | `[255, 254, 111, 90, 0, 0, 0, 52]` |
+| UART2, header pin 11, GPIO5 | `[255, 254, 122, 90, 0, 0, 0, 33]` |
+| UART3, header pin 37, GPIO32 | `[255, 254, 133, 90, 0, 0, 0, 222]` |
+| UART4, header pin 29, GPIO36 | `[255, 254, 144, 90, 0, 0, 0, 203]` |
+
+Companion example: `examples/k230_mspm0g_uart_gimbal_bringup.md`.
+
 ## 当前优先例程：MSPM0G3507 小车 CCS/Theia 工程
 
 当用户要写 MSPM0G 小车、OLED、MPU6050、TB6612、电机 PID、编码器、陀螺仪航向环、XDS110 烧录或 CCS/Theia 工程部署时，优先参考当前已整理例程：
