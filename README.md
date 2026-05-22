@@ -93,7 +93,7 @@ cp mspm0g-contest-skill/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 ## K230→MSPM0G UART 通信协议
 
-FF FE WHEELTEC, 9600 8N1, 10字节帧。
+FF FE , 9600 8N1, 10字节帧。
 
 ```
 [0xFF][0xFE][PAN][TILT][0x00][0x00][0x00][BCC][0x00][0x00]
