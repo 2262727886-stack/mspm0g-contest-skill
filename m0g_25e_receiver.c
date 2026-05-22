@@ -159,13 +159,17 @@ void motor_set_speed(float left, float right) {
 /* ============================================================
  * 七、舵机控制 (TIMA0, PB8=CH0, PB9=CH1)
  * ============================================================ */
-#define SERVO_MIN  625
-#define SERVO_MAX  3125
+/* TIMA0 50Hz PWM: period=9999, MCLK=32MHz/64prescaler=500kHz
+ * 1tick=2μs, 0°=250(0.5ms), 90°=750(1.5ms), 180°=1250(2.5ms) */
+#define SERVO_MIN  250U
+#define SERVO_MAX  1250U
 
 void servo_set(uint8_t ch, uint32_t angle_deg) {  // 0~180
-    uint32_t pulse = SERVO_MIN + (SERVO_MAX - SERVO_MIN) * angle_deg / 180;
-    if (ch == 0) DL_TimerG_setCaptureCompareValue(TIMA0, 0, pulse);  // PB8
-    else         DL_TimerG_setCaptureCompareValue(TIMA0, 1, pulse);  // PB9
+    uint32_t pulse = SERVO_MIN + (SERVO_MAX - SERVO_MIN) * angle_deg / 180U;
+    /* TIMA0 API: (inst, value, index) — 注意与 TIMG 的参数顺序不同 */
+    DL_TimerA_setCaptureCompareValue(TIMA0, pulse,
+        (ch == 0U) ? DL_TIMERA_CAPTURE_COMPARE_0_INDEX
+                   : DL_TIMERA_CAPTURE_COMPARE_1_INDEX);
 }
 
 /* ============================================================

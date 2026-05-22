@@ -17,6 +17,9 @@ const I2C_OLED = I2C.addInstance();
 const I2C_MPU = I2C.addInstance();
 const PWM    = scripting.addModule("/ti/driverlib/PWM", {}, false);
 const PWM_TB6612 = PWM.addInstance();
+const PWM_SERVO  = PWM.addInstance();
+const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART_K230 = UART.addInstance();
 const Board  = scripting.addModule("/ti/driverlib/Board", {}, false);
 
 GPIO1.$name                         = "GPIO";
@@ -90,9 +93,25 @@ PWM_TB6612.timerCount                 = 4000;
 PWM_TB6612.peripheral.ccp0Pin.$assign = "PB15";
 PWM_TB6612.peripheral.ccp1Pin.$assign = "PB16";
 
+PWM_SERVO.$name                      = "SERVO_PWM";
+PWM_SERVO.timerStartTimer            = true;
+PWM_SERVO.timerCount                 = 9999;
+PWM_SERVO.peripheral.ccp0Pin.$assign = "PB8";
+PWM_SERVO.peripheral.ccp1Pin.$assign = "PB9";
+
+UART_K230.$name                           = "UART_K230";
+UART_K230.peripheral.txPin.$assign        = "PB2";
+UART_K230.peripheral.rxPin.$assign        = "PB3";
+UART_K230.baudRate                        = 115200;
+UART_K230.dataLength                      = "8_BITS";
+UART_K230.parity                          = "NONE";
+UART_K230.stopBits                        = "1_BIT";
+
 Board.peripheral.$suggestSolution          = "DEBUGSS";
 Board.peripheral.swclkPin.$suggestSolution = "PA20";
 Board.peripheral.swdioPin.$suggestSolution = "PA19";
 I2C_OLED.peripheral.$suggestSolution       = "I2C0";
 I2C_MPU.peripheral.$suggestSolution        = "I2C1";
 PWM_TB6612.peripheral.$suggestSolution     = "TIMG8";
+PWM_SERVO.peripheral.$suggestSolution      = "TIMA0";
+UART_K230.peripheral.$suggestSolution      = "UART3";

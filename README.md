@@ -12,13 +12,13 @@ MSPM0G3507 (天猛星) + K230 (庐山派) 双芯架构 25E 电赛完整参考。
 |------|------|
 | `/mspm0g-contest 引脚分配` | 天猛星全引脚映射表 + 禁止使用引脚 |
 | `/mspm0g-contest GPIO` | GPIO 输出/输入/中断代码模板 |
-| `/mspm0g-contest PWM` | TIMG/TIMA PWM 配置+舵机+TB6612 |
-| `/mspm0g-contest 编码器` | 编码器轮询+TIMG QEI |
+| `/mspm0g-contest PWM` | TIMG/TIMA PWM 配置 + 舵机 + TB6612 |
+| `/mspm0g-contest 编码器` | 编码器轮询 + TIMG QEI |
 | `/mspm0g-contest I2C` | OLED SSD1306 / MPU6050 驱动 |
 | `/mspm0g-contest UART` | printf 重定向 / K230 通信 |
 | `/mspm0g-contest ADC` | TCRT5000 循迹 8路采样 |
-| `/mspm0g-contest PID` | **PID 速度闭环 + 串口调参 + VOFA+** |
-| `/mspm0g-contest 舵机` | SG90/MG996R 50Hz 角度控制 |
+| `/mspm0g-contest PID` | PID 速度闭环 + 串口调参 + VOFA+ |
+| `/mspm0g-contest 舵机` | 众灵PM/ZP系列 + SG90/MG996R 50Hz 角度控制 |
 | `/mspm0g-contest 电机` | TB6612 + MG310 速度闭环 |
 | `/mspm0g-contest OLED驱动` | SSD1306 I2C 显示驱动 |
 | `/mspm0g-contest K230` | K230 摄像头 + 视觉检测 + 双芯通信 |
@@ -44,22 +44,25 @@ cp mspm0g-contest-skill/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 |------|------|------|
 | **K230** | GC2093 QVGA 采集 60fps | ✅ 实机 |
 | **K230** | A4黑框 find_rects + A4几何中心 | ✅ 实机 |
-| **K230** | OLED SSD1306 I2C0 逐页写入 | ✅ 实机 |
-| **K230** | 自动Otsu阈值校准+验证回退 | ✅ 实机 |
-| **K230** | UART2→M0G 10字节帧 | ✅ 代码就绪 |
+| **K230** | find_blobs 色块追踪 + LAB自动校准 | ✅ 实机 |
+| **K230** | shape_detect 形状分类(矩/三角/圆) | ✅ 实机 |
+| **K230** | UART→M0G FF FE 10字节帧 (9600) | ✅ 实机 |
+| **K230** | TOUCH 触摸屏校准/菜单/调参 | ✅ 实机 |
 | **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 实机 |
 | **M0G** | UART0 printf (PA10/PA11 CH340) | ✅ 实机 |
 | **M0G** | LED (PB22) | ✅ 实机 |
 | **M0G** | OLED SSD1306 I2C0 (PA28/PA31) | ✅ 实机 |
-| **M0G** | TB6612 电机驱动 (B通道) | ✅ 实机 |
+| **M0G** | TB6612 电机驱动 (双通道) | ✅ 实机 |
 | **M0G** | 编码器轮询 (GMR 500PPR) | ✅ 实机 |
-| **M0G** | **PID 速度闭环 + 串口调参 + VOFA+** | ✅ 实机 |
+| **M0G** | PID 速度闭环 + 串口调参 + VOFA+ | ✅ 实机 |
+| **M0G** | **PID 位置-速度级联 + 航向PD 直线行走** | ✅ 实机 |
+| **M0G** | 舵机 TIMA0 PWM (PB8/PB9) | ✅ 实机 |
 | **M0G** | 拓展板全引脚 SysConfig | ✅ 验证 |
 | **M0G** | SDK API 黑名单 17 条 | ✅ dl_xxx.h确认 |
 | **M0G** | 12 个 G3507 裸机 driverlib 例程 | ✅ 已验证 |
-| **M0G** | 舵机 TIMA0 PWM (PB8/PB9) | 🟡 SysConfig已配 |
 | **M0G** | 按键 K1/K2 / 蜂鸣器 / ADC 循迹 | 🟡 待测 |
-| **双芯** | K230→M0G UART 联调 | 🟡 待接线 |
+| **双芯** | K230→M0G UART FF FE 帧联调 (9600) | ✅ 实机 |
+| **双芯** | K230色块追踪 → M0G舵机随动 | ✅ 实机 |
 
 ## 关键引脚
 
@@ -67,57 +70,68 @@ cp mspm0g-contest-skill/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 |------|-----------|------|
 | CH340 串口 | PA10(TX), PA11(RX) | UART0, 115200 |
 | OLED I2C0 | PA28(SDA), PA31(SCL) | SSD1306 |
-| TB6612 PWM | PB15(PWMA), PB16(PWMB) | TIMG8 |
-| TB6612 方向 | PA13(AIN1), PA12(AIN2), PB0(BIN1), PB1(BIN2) | |
-| 编码器B | PA17(A), PA24(B) | 轮询模式 |
-| 舵机 | PB8(CH0), PB9(CH1) | TIMA0 |
-| K230通信 | PB2(TX), PB3(RX) | UART3 |
+| TB6612 PWM | PB15(PWMA), PB16(PWMB) | TIMG8, 20kHz |
+| TB6612 方向 | PA13(AIN1), PA12(AIN2), PB0(BIN1), PB1(BIN2) | GPIO |
+| 编码器A | PA15(A), PA16(B) | GPIO 双边沿中断 |
+| 编码器B | PA17(A), PA24(B) | TIMG7 QEI |
+| 舵机 | PB8(CH0), PB9(CH1) | TIMA0, 50Hz PWM |
+| K230通信 | PB2(TX), PB3(RX) | UART3, 9600 |
 | LED/蜂鸣器 | PB22/PB17 | GPIO |
 
 ## SDK API 黑名单 (17 条)
 
 基于 TI MSPM0 SDK 2.10.00.04 dl_xxx.h 逐项确认，详见 SKILL.md。
 
+| 禁用 API | 正确替代 |
+|----------|---------|
+| `DL_GPIO_setDirection()` | `DL_GPIO_initDigitalOutput/Input(PINCMxx)` |
+| `DL_GPIO_setInternalResistor()` | `DL_GPIO_setDigitalInternalResistor(PINCMxx, ...)` |
+| `DL_ADC12_readMemResult()` | `DL_ADC12_getMemResult()` |
+| `DL_I2C_transmitBlocking()` | `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()` |
+| `DL_TimerG_getCounterValue()` | `DL_TimerG_getTimerCount()` |
+| `DL_TimerG_setCaptureCompareValue(TIMA0, ...)` | `DL_TimerA_setCaptureCompareValue(TIMA0, ...)` — TIMA0 是 TimerA 实例 |
+
+## K230→MSPM0G UART 通信协议
+
+FF FE WHEELTEC, 9600 8N1, 10字节帧。
+
+```
+[0xFF][0xFE][PAN][TILT][0x00][0x00][0x00][BCC][0x00][0x00]
+ PAN: 0-270°, TILT: 0-180°, BCC = 前7字节 XOR
+```
+
+| 链路 | K230 引脚 | MSPM0G 引脚 |
+|------|----------|------------|
+| TX→RX | GPIO3 (排针8, UART1_TXD) | PB3 (UART3_RX) |
+| TX→RX | GPIO36 (排针29, UART4_TXD) | PB3 (UART3_RX) |
+| GND | 任意 GND | GND |
+
+> OLED 调试应显示 `HEAD` 和 `FRAME` 持续递增，`RAW` 含 `FF FE`。先用 `k230_uart_all_test.py` 识别物理 TX 引脚，再用 `k230_wheeltec_track.py` 跑追踪。
+
 ## 模块例程
 
-| 模块 | 目录 | 状态 |
+| 模块 | 路径 | 状态 |
 |------|------|------|
-| **PID 速度闭环** | Documents/model/PID_Speed/ | ✅ 完整可编译 |
-| TB6612 电机 | Documents/model/TB6612_Verified/ | ✅ |
-| 编码器轮询 | Documents/model/Encoder_Poll/ | ✅ |
-| OLED I2C | workspace_ccstheia/test_1/ | ✅ |
+| K230 UART全通道测试 | `workspace_ccstheia/test_2/k230_uart_all_test.py` | ✅ 引脚识别 |
+| K230 WHEELTEC追踪 | `workspace_ccstheia/test_2/k230_wheeltec_track.py` | ✅ FF FE 9600 |
+| K230 形状检测 | `k230_shape_detect.py` | ✅ 触屏菜单 |
+| K230 触屏调参 | `k230_touch_tuner.py` | ✅ |
+| M0G 云台接收 | `workspace_ccstheia/servo_test/main.c` | ✅ FF FE解析 |
+| M0G 云台驱动 | `workspace_ccstheia/servo_test/gimbal.c` | ✅ PM270/180 |
+| M0G 25E接收 | `m0g_25e_receiver.c` | ✅ UART3中断 |
+| PID 速度闭环 | `Documents/model/PID_Speed/` | ✅ 完整可编译 |
+| PID 级联控制 | `workspace_ccstheia/test_2/` | ✅ 位置-速度+航向PD |
+| TB6612 电机 | `Documents/model/TB6612_Verified/` | ✅ |
+| 编码器轮询 | `Documents/model/Encoder_Poll/` | ✅ |
+| OLED I2C | `workspace_ccstheia/test_2/` | ✅ |
 
-## 2026-05 Verified K230 -> MSPM0G Gimbal UART Path
+## 舵机选型
 
-Use this as the current known-good wiring and debug recipe for the K230 vision
-tracker driving the MSPM0G3507 two-axis gimbal:
+| 型号 | 类型 | 角度 | 协议 | 扭矩范围 |
+|------|------|------|------|----------|
+| 众灵 PM 系列 | PWM 舵机 | 270° (默认) / 180° | 50Hz, 500~2500μs | 10~80 kg·cm |
+| 众灵 ZP 系列 | 串行总线舵机 | 270° / 360° | UART 单线半双工, #XXXPYYYYTZZZZ! | 10~80 kg·cm |
+| SG90 | PWM 舵机 | 180° | 50Hz, 500~2500μs | 1.5 kg·cm |
+| MG996R | PWM 舵机 | 180° | 50Hz, 500~2500μs | 10 kg·cm |
 
-| Link | Verified value |
-| --- | --- |
-| K230 TX | 40-pin header pin 8, GPIO3, UART1_TXD |
-| MSPM0G RX | PB3, UART3_RX |
-| Ground | K230 GND to MSPM0G GND |
-| Baud | 9600 8N1 |
-| Frame | `FF FE pan tilt 00 00 00 BCC` |
-| BCC | XOR of bytes 0..6 |
-
-Important lessons:
-
-- `PB3` is RX in the MSPM0G SysConfig; `PB2` is TX.
-- Do not confuse K230 GPIO numbers with 40-pin header numbers. Header pin 8 is
-  GPIO3/UART1_TXD in the verified jumper-wire setup.
-- 115200 caused intermittent `HEAD/FRAME` hits and BCC errors with the current
-  wiring. Use 9600 first, then raise baud only after the link is stable.
-- Use OLED debug on MSPM0G when XDS110/user UART gets hot or inconvenient.
-  Normal OLED debug should show `HEAD` and `FRAME` increasing continuously and
-  `RAW` repeatedly containing `FF FE`.
-- Run `workspace_ccstheia/test_2/k230_uart_all_test.py` before the vision
-  tracker. It transmits unique pan values on UART1/2/3/4 so the OLED `P:` field
-  identifies the physical TX pin.
-
-Current example files:
-
-- `workspace_ccstheia/test_2/k230_uart_all_test.py`
-- `workspace_ccstheia/test_2/k230_wheeltec_track.py`
-- `workspace_ccstheia/servo_test/main.c`
-- `workspace_ccstheia/servo_test/empty.syscfg`
+> PM/ZP 系列为当前首选。PM 与 SG90/MG996R 使用相同的 50Hz PWM 协议，可直接替换。ZP 系列通过 UART 串行指令控制，支持 255 舵机共享总线、角度回读、掉电记忆。
