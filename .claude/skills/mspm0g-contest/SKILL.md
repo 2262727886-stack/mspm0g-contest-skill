@@ -10,6 +10,27 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 ---
 
+## 当前优先例程：MSPM0G3507 小车 CCS/Theia 工程
+
+当用户要写 MSPM0G 小车、OLED、MPU6050、TB6612、电机 PID、编码器、陀螺仪航向环、XDS110 烧录或 CCS/Theia 工程部署时，优先参考当前已整理例程：
+
+- 工程路径：`C:\Users\Administrator\workspace_ccstheia\test_2`
+- 例程说明：`examples/mspm0g3507_car_ccs_theia.md`
+- 固件输出：`C:\Users\Administrator\workspace_ccstheia\test_2\Debug\test_2.out`
+
+本例程已形成以下结论，优先级高于本文档旧段落中的冲突说法：
+
+- PA10/PA11 是冲突资源：可用于 UART0/VOFA，也可按拓展板接 MPU6050 I2C1，但二者不能同时启用。本小车例程使用 `PA10=I2C1_SDA`、`PA11=I2C1_SCL`，因此关闭 UART0/VOFA。
+- TB6612 接线：`PWMA=PB15/TIMG8_C0`、`PWMB=PB16/TIMG8_C1`、`AIN1=PA13`、`AIN2=PA12`、`BIN1=PB0`、`BIN2=PB1`。
+- 编码器接线：A 轮 `PA15/PA16`，B 轮 `PA17/PA24`，当前例程用 1ms GPIO 轮询解码。
+- **车轮映射**：B=左轮 (PWMB=PB16, 编码器 PA17/PA24)，A=右轮 (PWMA=PB15, 编码器 PA15/PA16)。`MOTOR_A_OUTPUT_SIGN=-1`, `MOTOR_B_OUTPUT_SIGN=-1`, `MOTOR_A_ENCODER_SIGN=1`, `MOTOR_B_ENCODER_SIGN=-1`。
+- 按键：`PA26` 启动小车（含 1 秒陀螺重校准）；`PA25` 校准键（停车+编码器归零+陀螺重校准）。
+- `DL_TimerG_setCaptureCompareValue()` 在 `mspm0_sdk_2_10_00_04` 中已核验为 `(timer, value, ccIndex)` 参数顺序。
+- **控制架构**：串级位置+速度双环 PID（外环位置 PI → 内环速度 PID）+ 航向 PD 软启用（启动后 1 秒渐进）。位置环防暴冲三重保护：`POS_CORR_MAX`/`MOTOR_MAX_SPEED_TARGET`/`POS_ERR_MAX`。
+- 电池调试时先降低 `MOTOR_A_TARGET_COUNT` / `MOTOR_B_TARGET_COUNT`，再限制 `MOTOR_PWM_MAX_OUTPUT` 和 `MOTOR_PWM_STEP_PER_PID`。
+
+---
+
 ## ✅ 验证状态追踪
 
 | 模块 | 子项 | 状态 | 验证方式 |
@@ -41,12 +62,12 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | **M0G** | TIMA0 舵机 | 🟡 代码就绪 | 待实机 |
 | **M0G** | I2C 通用驱动 (i2c_write_bytes) | ✅ 已验证 | 传参复用, 支持双总线 |
 | **M0G** | I2C0 OLED SSD1306 (PA28/PA31) | ✅ 已验证 | 5x7 字体, 400kHz |
-| **M0G** | I2C1 MPU6050 | ⚠️ 引脚待确认 | 禁止 PA10/PA11；这两个脚被 CH340 占用 |
+| **M0G** | I2C1 MPU6050 | ✅ 例程已接入 | 小车拓展板使用 PA10/PA11；与 UART0/VOFA 二选一 |
 | **M0G** | ADC0 8路TCRT5000 | 🟡 代码就绪 | 待实机 |
 | **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 已验证 | 实机烧录成功 |
 | **M0G** | XDS110 SWD 快速烧录脚本 | ✅ 已验证 | DSLite 命令行 ~4.3秒 |
 | **M0G** | UART0 CH340 (PA10/PA11) | ✅ 已验证 | 实机 115200 串口输出 |
-| **M0G** | PID/滤波/卡尔曼 算法 | ❌ 未实机验证 | 纯算法代码 |
+| **M0G** | PID/滤波/卡尔曼 算法 | ✅ 实机验证 | 串级位置+速度双环PID + 航向PD软启用, 实机直线行驶稳定 |
 | **M0G** | Flash 参数存储 | ❌ 未实机验证 | |
 | **M0G** | 真题方案 25E/24H/23E | ❌ 未实机验证 | 框架代码 |
 | **双芯** | K230→M0G UART通信 | 🟡 代码就绪 | 待接线联调 |
@@ -70,7 +91,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 | 禁用引脚 | 原因 | 备注 |
 |----------|------|------|
-| **PA10, PA11** | 板载 CH340 固定占用 (UART0 TX/RX) | 不可改，不可复用 |
+| **PA10, PA11** | UART0/VOFA 与 I2C1/MPU6050 冲突资源 | 按实际硬件二选一；小车例程用于 MPU6050 |
 | **PA2~PA6** | 时钟引脚 (ROSC/LFXIN/HFXIN) | 默认未焊接，**绝对勿用** |
 | **PA19** | SWDIO 调试数据 | 保留调试接口 |
 | **PA20** | SWCLK 调试时钟 | 保留调试接口 |
@@ -114,7 +135,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
   - `DL_WDT_feed/enable/setPeriod/getCount(WDT)` — 全部不存在, 外设名为 WWDT, 喂狗= `DL_WWDT_restart(WWDT0_INST)`, 配置全在 SysConfig
   - `DL_FlashCTL_eraseSector(sector)` — 不存在, 正确: `DL_FlashCTL_eraseMemoryFromRAM(FLASHCTL, addr, size)`
   - `DL_FlashCTL_programMemory(addr, data, len)` — 不存在, 正确: `DL_FlashCTL_programMemoryFromRAM32/64WithECCGenerated(FLASHCTL, addr, &data)`
-  - `DL_TimerG_setCaptureCompareValue(inst, value, index)` — **参数顺序错误**, 正确: `DL_TimerG_setCaptureCompareValue(inst, INDEX, VALUE)`
+  - `DL_TimerG_setCaptureCompareValue()` — SDK `mspm0_sdk_2_10_00_04` 已核验签名为 `DL_TimerG_setCaptureCompareValue(inst, value, index)`
 - **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---

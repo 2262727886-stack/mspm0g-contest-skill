@@ -1,0 +1,98 @@
+/**
+ * MSPM0G3507 car control: OLED on I2C0, MPU6050 on I2C1.
+ */
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
+
+const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1  = GPIO.addInstance();
+const GPIO_KEY = GPIO.addInstance();
+const GPIO_START = GPIO.addInstance();
+const GPIO_TB6612 = GPIO.addInstance();
+const GPIO_ENC_A = GPIO.addInstance();
+const GPIO_ENC_B = GPIO.addInstance();
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+const I2C    = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C_OLED = I2C.addInstance();
+const I2C_MPU = I2C.addInstance();
+const PWM    = scripting.addModule("/ti/driverlib/PWM", {}, false);
+const PWM_TB6612 = PWM.addInstance();
+const Board  = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+GPIO1.$name                         = "GPIO";
+GPIO1.associatedPins[0].$name       = "LED";
+GPIO1.associatedPins[0].pin.$assign = "PB22";
+
+GPIO_KEY.$name                              = "GPIO_KEY";
+GPIO_KEY.associatedPins[0].$name            = "CAL_KEY";
+GPIO_KEY.associatedPins[0].direction        = "INPUT";
+GPIO_KEY.associatedPins[0].internalResistor = "PULL_UP";
+GPIO_KEY.associatedPins[0].pin.$assign      = "PA25";
+
+GPIO_START.$name                              = "GPIO_START";
+GPIO_START.associatedPins[0].$name            = "START_KEY";
+GPIO_START.associatedPins[0].direction        = "INPUT";
+GPIO_START.associatedPins[0].internalResistor = "PULL_UP";
+GPIO_START.associatedPins[0].pin.$assign      = "PA26";
+
+GPIO_TB6612.$name = "GPIO_TB6612";
+GPIO_TB6612.associatedPins.create(4);
+GPIO_TB6612.associatedPins[0].$name       = "AIN1";
+GPIO_TB6612.associatedPins[0].pin.$assign = "PA13";
+GPIO_TB6612.associatedPins[1].$name       = "AIN2";
+GPIO_TB6612.associatedPins[1].pin.$assign = "PA12";
+GPIO_TB6612.associatedPins[2].$name       = "BIN1";
+GPIO_TB6612.associatedPins[2].pin.$assign = "PB0";
+GPIO_TB6612.associatedPins[3].$name       = "BIN2";
+GPIO_TB6612.associatedPins[3].pin.$assign = "PB1";
+
+GPIO_ENC_A.$name = "GPIO_ENC_A";
+GPIO_ENC_A.associatedPins.create(2);
+GPIO_ENC_A.associatedPins[0].$name            = "ENC_A_A";
+GPIO_ENC_A.associatedPins[0].direction        = "INPUT";
+GPIO_ENC_A.associatedPins[0].internalResistor = "PULL_UP";
+GPIO_ENC_A.associatedPins[0].pin.$assign      = "PA15";
+GPIO_ENC_A.associatedPins[1].$name            = "ENC_A_B";
+GPIO_ENC_A.associatedPins[1].direction        = "INPUT";
+GPIO_ENC_A.associatedPins[1].internalResistor = "PULL_UP";
+GPIO_ENC_A.associatedPins[1].pin.$assign      = "PA16";
+
+GPIO_ENC_B.$name = "GPIO_ENC_B";
+GPIO_ENC_B.associatedPins.create(2);
+GPIO_ENC_B.associatedPins[0].$name            = "ENC_B_A";
+GPIO_ENC_B.associatedPins[0].direction        = "INPUT";
+GPIO_ENC_B.associatedPins[0].internalResistor = "PULL_UP";
+GPIO_ENC_B.associatedPins[0].pin.$assign      = "PA17";
+GPIO_ENC_B.associatedPins[1].$name            = "ENC_B_B";
+GPIO_ENC_B.associatedPins[1].direction        = "INPUT";
+GPIO_ENC_B.associatedPins[1].internalResistor = "PULL_UP";
+GPIO_ENC_B.associatedPins[1].pin.$assign      = "PA24";
+
+SYSCTL.forceDefaultClkConfig = true;
+
+I2C_OLED.$name                     = "I2C_OLED";
+I2C_OLED.peripheral.sdaPin.$assign = "PA28";
+I2C_OLED.peripheral.sclPin.$assign = "PA31";
+I2C_OLED.basicEnableController     = true;
+I2C_OLED.basicControllerBusSpeed   = 400000;
+I2C_OLED.advControllerTXFIFOTRIG   = "BYTES_1";
+
+I2C_MPU.$name                     = "I2C_MPU";
+I2C_MPU.peripheral.sdaPin.$assign = "PA10";
+I2C_MPU.peripheral.sclPin.$assign = "PA11";
+I2C_MPU.basicEnableController     = true;
+I2C_MPU.basicControllerBusSpeed   = 400000;
+I2C_MPU.advControllerTXFIFOTRIG   = "BYTES_1";
+
+PWM_TB6612.$name                      = "PWM_TB6612";
+PWM_TB6612.timerStartTimer            = true;
+PWM_TB6612.timerCount                 = 4000;
+PWM_TB6612.peripheral.ccp0Pin.$assign = "PB15";
+PWM_TB6612.peripheral.ccp1Pin.$assign = "PB16";
+
+Board.peripheral.$suggestSolution          = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution = "PA20";
+Board.peripheral.swdioPin.$suggestSolution = "PA19";
+I2C_OLED.peripheral.$suggestSolution       = "I2C0";
+I2C_MPU.peripheral.$suggestSolution        = "I2C1";
+PWM_TB6612.peripheral.$suggestSolution     = "TIMG8";
