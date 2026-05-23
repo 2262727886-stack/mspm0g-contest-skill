@@ -46,7 +46,7 @@ cp mspm0g-contest-skill/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 | **K230** | A4黑框 find_rects + A4几何中心 | ✅ 实机 |
 | **K230** | find_blobs 色块追踪 + LAB自动校准 | ✅ 实机 |
 | **K230** | shape_detect 形状分类(矩/三角/圆) | ✅ 实机 |
-| **K230** | UART→M0G FF FE 10字节帧 (9600) | ✅ 实机 |
+| **K230** | UART→M0G FF FE 8字节帧 (9600) | ✅ 实机 |
 | **K230** | TOUCH 触摸屏校准/菜单/调参 | ✅ 实机 |
 | **M0G** | BSL 串口烧录 (UniFlash+CH340) | ✅ 实机 |
 | **M0G** | UART0 printf (PA10/PA11 CH340) | ✅ 实机 |
@@ -93,17 +93,16 @@ cp mspm0g-contest-skill/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 ## K230→MSPM0G UART 通信协议
 
-FF FE , 9600 8N1, 10字节帧。
+FF FE WHEELTEC, 9600 8N1, 10字节帧。
 
 ```
-[0xFF][0xFE][PAN][TILT][0x00][0x00][0x00][BCC][0x00][0x00]
- PAN: 0-270°, TILT: 0-180°, BCC = 前7字节 XOR
+[0xFF][0xFE][PAN][TILT][0x00][0x00][0x00][BCC]
+ PAN: 1字节, TILT: 1字节, BCC = 前7字节 XOR
 ```
 
 | 链路 | K230 引脚 | MSPM0G 引脚 |
 |------|----------|------------|
-| TX→RX | GPIO3 (排针8, UART1_TXD) | PB3 (UART3_RX) |
-| TX→RX | GPIO36 (排针29, UART4_TXD) | PB3 (UART3_RX) |
+| TX→RX | GPIO3 (排针8, UART1_TXD，实测稳定) | PB3 (UART3_RX) |
 | GND | 任意 GND | GND |
 
 > OLED 调试应显示 `HEAD` 和 `FRAME` 持续递增，`RAW` 含 `FF FE`。先用 `k230_uart_all_test.py` 识别物理 TX 引脚，再用 `k230_wheeltec_track.py` 跑追踪。
@@ -129,9 +128,11 @@ FF FE , 9600 8N1, 10字节帧。
 
 | 型号 | 类型 | 角度 | 协议 | 扭矩范围 |
 |------|------|------|------|----------|
-| 众灵 PM 系列 | PWM 舵机 | 270° (默认) / 180° | 50Hz, 500~2500μs | 10~80 kg·cm |
-| 众灵 ZP 系列 | 串行总线舵机 | 270° / 360° | UART 单线半双工, #XXXPYYYYTZZZZ! | 10~80 kg·cm |
-| SG90 | PWM 舵机 | 180° | 50Hz, 500~2500μs | 1.5 kg·cm |
-| MG996R | PWM 舵机 | 180° | 50Hz, 500~2500μs | 10 kg·cm |
+| 众灵 PM 系列 | **纯 PWM 舵机** | 270° (默认) / 180° | 50Hz PWM, 500~2500μs | 10~80 kg·cm |
+| 众灵 ZP 系列 | **串行总线舵机** | 270° | UART 115200, `#XXXPYYYYTZZZZ!` | 10~80 kg·cm |
+| SG90 | PWM 舵机 | 180° | 50Hz PWM, 500~2500μs | 1.5 kg·cm |
+| MG996R | PWM 舵机 | 180° | 50Hz PWM, 500~2500μs | 10 kg·cm |
 
-> PM/ZP 系列为当前首选。PM 与 SG90/MG996R 使用相同的 50Hz PWM 协议，可直接替换。ZP 系列通过 UART 串行指令控制，支持 255 舵机共享总线、角度回读、掉电记忆。
+**PM 系列 (PWM 舵机)**：三线接口（棕=GND, 红=VCC, 黄/白=信号），与 SG90/MG996R 相同的 50Hz PWM 协议，可直接替换。电压: PM10=4~6V, PM15-45=5~8.4V, PM60-80=5~13V。
+
+**ZP 系列 (串行总线舵机)**：内置 MCU，单线 UART 半双工，255 个舵机共享一条总线。协议格式: `#XXXPYYYYTZZZZ!`（XXX=ID, YYYY=PWM值500~2500, ZZZZ=执行时间0~65535ms）。多舵机动作组: `{#0P1500T1000!#1P2000T0500!}`。停止: `$DST!`。波特率 115200。官方控制器源码(2017-08 V2.0)仅含基本角度/时间/停止指令，`PRAD/PULK/PMOD` 等扩展命令因固件版本差异可能不可用，实测前先用基础指令验证。

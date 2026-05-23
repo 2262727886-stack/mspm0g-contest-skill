@@ -12,46 +12,64 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 ## ⚠️ 强制开发规范（最高优先级，不可违反）
 
 ### 1. 资料边界
-- 所有代码生成、解答、引脚分配**只能基于已知资料**
+- 后续所有代码生成、解答、引脚分配**只能基于本文档提供的资料**
 - **禁止编造幻觉**：不存在的外设、不存在的引脚、不存在的 API 一律不得出现
+- **禁止引用外部不知名手册**：不得引用非 TI 官方或本文档未收录的任何数据手册、SDK 文档
 
 ### 2. 引脚配置铁律
-- **必须先询问用户实际引脚**："你的硬件接了哪些引脚？"
-- **绝不能在代码里写死引脚号**，模板用 `/* PAxx — 请替换为实际引脚 */` 占位符
+- **必须先询问用户实际引脚**：代码模板中的引脚仅作示例（标记为 `/* 示例 */`），**每次生成代码前必须先问用户**："你的硬件接了哪些引脚？" 根据用户实际接线生成代码，**绝不能在代码里写死引脚号**
+- **代码模板使用占位符**：模板中用 `/* PAxx — 请替换为实际引脚 */` 标记，等用户确认后再替换为实际值
 
-**禁用引脚（每次分配时必须排除）**：
+**禁用引脚必须明确写死**：每次涉及 GPIO/外设分配时，必须先排除以下引脚：
 
-| 禁用引脚 | 原因 |
-|----------|------|
-| PA2~PA6 | 时钟引脚，未焊接 |
-| PA10, PA11 | 板载 CH340 固定占用 (UART0)，可与 MPU6050 I2C1 切换使用 |
-| PA19 | SWDIO 调试数据 |
-| PA20 | SWCLK 调试时钟 |
+| 禁用引脚 | 原因 | 备注 |
+|----------|------|------|
+| **PA10, PA11** | UART0/VOFA 与 I2C1/MPU6050 冲突资源 | 按实际硬件二选一；小车例程用于 MPU6050 |
+| **PA2~PA6** | 时钟引脚 (ROSC/LFXIN/HFXIN) | 默认未焊接，**绝对勿用** |
+| **PA19** | SWDIO 调试数据 | 保留调试接口 |
+| **PA20** | SWCLK 调试时钟 | 保留调试接口 |
 
-**每次分配引脚必须输出如下表格**：
+**所有外设引脚必须做成表格**：每次分配引脚时，必须输出如下格式的完整表格，缺一不可：
 
 | 外设功能 | 芯片/模块型号 | 天猛星引脚 | IOMUX索引 | 片上复用功能 | 备注 |
 |----------|--------------|-----------|-----------|-------------|------|
+| xxx | xxx | PAxx | PINCMxx | UART0_TX / GPIO | xxx |
 
-- **禁止**："用某个引脚""随便接一个 GPIO" 等模糊表述
+- **禁止模糊输入**：不得出现"用某个引脚""随便接一个 GPIO"等模糊表述
+- **禁止纯纯复用源代码**：不能直接粘贴本文档中的代码模板而不根据实际硬件调整引脚
 
 ### 3. 代码质量
-- 所有代码带完整中文注释说明 WHY
-- 模块化结构：按功能拆分为独立 .h/.c 文件
-- 硬件必须明确型号：MCU=MSPM0G3507、电机驱动=TB6612FNG、电机=MG310、IMU=MPU6050、OLED=SSD1306(0.96" I2C)、激光=405nm蓝紫≤10mW、舵机=众灵PM系列(首选)/SG90/MG996R
+- **VS Code 依赖配置必做**：每次创建、接手或整理 MSPM0G CCS/Theia 工程后，必须自行创建/更新工作区 `.vscode/c_cpp_properties.json`，这是"代码不报错"的必备依赖库配置。配置必须包含工程根目录、工程 `Debug` 目录、MSPM0 SDK `source`、CMSIS、TI ArmClang include；`defines` 至少包含 `__MSPM0G3507__` 和 `__USE_SYSCONFIG__`；`compilerPath` 必须指向当前机器实际存在的 `tiarmclang.exe`。不要等用户提醒。
+- **所有代码必须带完整注释**：每个函数、每个关键变量、每段算法逻辑必须有中文注释说明 WHY
+- **模块化结构铁律**：按功能拆分为独立 .h/.c 文件，通过 `#include` 内联编译。**严禁全部代码堆在 main.c**。标准结构：
+  ```
+  工程目录/
+  ├── main.c          ← 仅 main() + 系统初始化
+  ├── oled.h / oled.c ← OLED 驱动模块
+  ├── servo.h / .c    ← 舵机模块
+  ├── motor.h / .c    ← 电机模块
+  └── ...
+  ```
+- **所有芯片和硬件必须明确型号**：MCU=MSPM0G3507、电机驱动=TB6612FNG、电机=MG310、IMU=MPU6050、OLED=SSD1306(0.96" I2C)、激光=405nm蓝紫≤10mW、舵机=众灵PM系列(首选)/SG90/MG996R 等，不得含糊
 
 ### 4. API 安全
-SDK 版本 `mspm0_sdk_2_10_00_04`，API 必须真实存在。
-
-**API 黑名单**：
-- `DL_GPIO_setDirection()` → `DL_GPIO_initDigitalOutput/Input(PINCMxx)`
-- `DL_GPIO_setInternalResistor()` → `DL_GPIO_setDigitalInternalResistor(PINCMxx, ...)`
-- `DL_ADC12_readMemResult()` → `DL_ADC12_getMemResult()`
-- `DL_I2C_transmitBlocking()` / `DL_I2C_receiveBlocking()` → `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()`
-- `DL_TimerG_getCounterValue()` → `DL_TimerG_getTimerCount()`
-- `DL_TimerG_setCaptureCompareValue(TIMA0, ...)` → `DL_TimerA_setCaptureCompareValue(TIMA0, ...)` — TIMA0 是 TimerA 实例
-
-**可用定时器白名单**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0（TIMG1~5 不存在）
+- 使用 SDK API 前必须确认该函数在当前版本 `mspm0_sdk_2_10_00_04` 的 `dl_xxx.h` 中**真实存在**
+- **已知不可用的 API（黑名单，经 SDK 2.10.00.04 dl_xxx.h 逐项确认）**：
+  - `DL_GPIO_setDirection()` — 不存在 (dl_gpio.h)
+  - `DL_GPIO_setInternalResistor()` — 不存在 (dl_gpio.h), 正确: `DL_GPIO_setDigitalInternalResistor(PINCMxx, ...)`
+  - `DL_ADC12_readMemResult()` — 不存在, 正确: `DL_ADC12_getMemResult()`
+  - `DL_I2C_transmitBlocking()` / `DL_I2C_receiveBlocking()` — 不存在, 正确: `DL_I2C_fillControllerTXFIFO()` + `DL_I2C_startControllerTransfer()`
+  - `DL_I2C_isBusy()` — 不存在, 正确: `DL_I2C_getControllerStatus(I2Cx) & DL_I2C_CONTROLLER_STATUS_BUSY`
+  - `DL_I2C_sendControllerStop()` — 不存在, STOP 由 `DL_I2C_startControllerTransfer()` 自动生成
+  - `DL_I2C_startControllerTransfer(i2c, dir, len)` 缺地址参数 — 正确: `DL_I2C_startControllerTransfer(i2c, addr, dir, len)` (4参数)
+  - `DL_TimerG_setPeriod()` — 不存在, 周期在 SysConfig 中设置
+  - `DL_TimerG_getCounterValue()` — 不存在, 正确: `DL_TimerG_getTimerCount()` (= `DL_Timer_getTimerCount`)
+  - `DL_SPI_transferBlocking()` — 不存在, 正确: `DL_SPI_transmitDataBlocking8/16/32()` + `DL_SPI_receiveDataBlocking8/16/32()`
+  - `DL_WDT_feed/enable/setPeriod/getCount(WDT)` — 全部不存在, 外设名为 WWDT, 喂狗= `DL_WWDT_restart(WWDT0_INST)`, 配置全在 SysConfig
+  - `DL_FlashCTL_eraseSector(sector)` — 不存在, 正确: `DL_FlashCTL_eraseMemoryFromRAM(FLASHCTL, addr, size)`
+  - `DL_FlashCTL_programMemory(addr, data, len)` — 不存在, 正确: `DL_FlashCTL_programMemoryFromRAM32/64WithECCGenerated(FLASHCTL, addr, &data)`
+  - `DL_TimerG_setCaptureCompareValue(TIMA0, ...)` — TIMA0 是 TimerA 实例，必须用 `DL_TimerA_setCaptureCompareValue(TIMA0, value, index)`
+- **可用定时器实例（白名单）**：仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0 — TIMG1~5 不存在
 
 ---
 
@@ -148,7 +166,9 @@ Pin/API traps:
 | 模块 | 子项 | 状态 |
 |------|------|------|
 | **K230** | GC2093 QVGA 60fps / find_blobs+LAB校准 / 形状检测 / TOUCH / UART FF FE 9600 | ✅ 实机 |
-| **M0G** | LED / OLED / TB6612 / 编码器 / PID速度闭环 / PID级联+航向PD / 舵机TIMA0 | ✅ 实机 |
+| **M0G** | LED / OLED / TB6612 / 编码器 / 编码器速度均衡PI (直线行驶) / 增量式PI+航向PD库 (pid_ctrl) / 舵机TIMA0 | ✅ 实机 |
+| **M0G** | MPU6050 DMP yaw 读取/显示 / I2C OLED+MPU 双总线 | ✅ 实机 |
+| **M0G** | 航向PD闭环 (yaw参与控制) | ⚠️ 代码就绪但默认不启用 (DMP yaw漂移会带偏) |
 | **M0G** | BSL烧录 / UART0 printf / SysConfig全引脚 / 12个driverlib例程 | ✅ 验证 |
 | **M0G** | 按键K1/K2 / 蜂鸣器 / ADC循迹 | 🟡 待测 |
 | **双芯** | K230→M0G UART FF FE (9600) / 色块追踪→舵机随动 | ✅ 实机 |
