@@ -9,11 +9,21 @@
 | 车轮周长 | π×4.8cm≈15.08cm | 同 |
 | 供电 | 3.3V/5V | 3.3V/5V |
 
-## 编码器 A — GPIO 双边沿中断 (PA15/PA16)
+## ⚠️ 编码器与左右轮映射铁律
+
+| 编码器 | 电机/车轮 | A相引脚 | B相引脚 | 片上功能 | 方案 |
+|--------|----------|---------|---------|---------|------|
+| **编码器A** | **右轮** | PA15 | PA16 | TIMA1_CH0/CH1 (不支持QEI) | GPIO双边沿中断 |
+| **编码器B** | **左轮** | PA17 | PA24 | TIMG7_CH0/CH1 (支持QEI) | TIMG7正交编码 |
+
+> TIMA1 不支持 Encoder Mode (QEI)，所以右轮编码器只能用 GPIO 中断软件解码。
+> 每次生成代码前先问用户编码器A/B分别对应哪个轮子。
+
+## 编码器 A (右轮) — GPIO 双边沿中断 (PA15/PA16)
 
 ```c
 // PA15=A相, PA16=B相 — GPIO 双边沿中断, 4倍频
-volatile int32_t enc_a_count = 0;
+volatile int32_t enc_a_count = 0;  // 右轮编码器 (PA15=A相, PA16=B相)
 
 // SysConfig: GPIO_ENC_A → PA15/PA16 → INPUT + PULL_UP + 双边沿中断
 void GROUP1_IRQHandler(void) {
@@ -40,10 +50,10 @@ int32_t encoder_a_read(void) {
 void encoder_a_reset(void) { enc_a_count = 0; }
 ```
 
-## 编码器 B — TIMG7 QEI 正交编码 (PA17/PA24)
+## 编码器 B (左轮) — TIMG7 QEI 正交编码 (PA17/PA24)
 
 ```c
-// PA17=TIMG7_CH0, PA24=TIMG7_CH1 — 硬件QEI自动计数
+// 左轮编码器: PA17=TIMG7_CH0, PA24=TIMG7_CH1 — 硬件QEI自动计数
 // SysConfig: TIMG7 → Encoder Mode → 双边沿4倍频
 
 int32_t encoder_b_read(void) {
