@@ -8,11 +8,21 @@
 - TIMG PWM 默认 edge-aligned **up-count**: CC=0→输出100%, CC=period→输出0%
 - 可用定时器白名单: 仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0
 
+## ⚠️ TB6612 通道与左右轮铁律
+
+```
+TB6612 A 通道 (PWMA/PB15/PA13/PA12) → 右轮
+TB6612 B 通道 (PWMB/PB16/PB0/PB1)   → 左轮
+
+每次生成小车代码前必须先问用户确认左右轮接线！
+```
+
 ## SysConfig 配置 PWM (TB6612 电机, TIMG8)
 
 ```
 ADD → Timer G → Name: TIMG_8 → Mode: PWM
-  → PWM Pin0: PB15 (TIMG8_C0) → PWM Pin1: PB16 (TIMG8_C1)
+  → PWM Pin0: PB15 (TIMG8_C0) → PWMA (右轮)
+  → PWM Pin1: PB16 (TIMG8_C1) → PWMB (左轮)
   → Period: 4000 (32MHz/4000=8kHz 或 PLL 80MHz/4000=20kHz)
   → 保存
 ```
@@ -21,9 +31,10 @@ ADD → Timer G → Name: TIMG_8 → Mode: PWM
 
 ```c
 // PWM 启动和占空比调整
+// ⚠️ A通道(PB15, CH0)=右轮, B通道(PB16, CH1)=左轮
 DL_TimerG_startCounter(TIMG8);
-DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_0_INDEX, duty_a);  // CH0=PB15
-DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_1_INDEX, duty_b);  // CH1=PB16
+DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_0_INDEX, duty_a);  // CH0=PB15=右轮
+DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_1_INDEX, duty_b);  // CH1=PB16=左轮
 
 // 刹车: 占空比设为 period (输出常低)
 DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_0_INDEX, 4000);

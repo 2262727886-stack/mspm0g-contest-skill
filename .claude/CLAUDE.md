@@ -32,6 +32,7 @@
 
 - **禁止模糊输入**：不得出现"用某个引脚""随便接一个 GPIO"等模糊表述
 - **禁止纯纯复用源代码**：不能直接粘贴本文档中的代码模板而不根据实际硬件调整引脚
+- **⚠️ TB6612 A/B 通道铁律**：天猛星小车 **A通道(PWMA/PA13/PA12)=右轮, B通道(PWMB/PB0/PB1)=左轮**。**每次生成小车控制代码前必须先问用户**："你的TB6612是A通道接右轮、B通道接左轮吗？" 如果用户接反, 交换 motor_left_set/motor_right_set 引脚映射即可
 
 ### 3. 代码质量
 - **VS Code 依赖配置必做**：每次创建、接手或整理 MSPM0G CCS/Theia 工程后，必须自行创建/更新工作区 `.vscode/c_cpp_properties.json`，这是"代码不报错"的必备依赖库配置。配置必须包含工程根目录、工程 `Debug` 目录、MSPM0 SDK `source`、CMSIS、TI ArmClang include；`defines` 至少包含 `__MSPM0G3507__` 和 `__USE_SYSCONFIG__`；`compilerPath` 必须指向当前机器实际存在的 `tiarmclang.exe`。不要等用户提醒。

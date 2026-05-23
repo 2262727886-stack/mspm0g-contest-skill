@@ -6,6 +6,21 @@
 > **核心思路**: 编码器速度均衡 PI (内环) 驱直，MPU6050 DMP yaw 仅显示不参与控制 (避免漂移带偏)。
 > **备用**: 航向 PD (外环) 代码已就绪但默认不接入，只在陀螺仪校准良好时启用。
 
+### ⚠️ 关键铁律：TB6612 A/B 通道与左右轮映射
+
+```
+TB6612 A 通道 (PWMA/PA13/PA12) → 右轮
+TB6612 B 通道 (PWMB/PB0/PB1)   → 左轮
+```
+
+**每次生成小车代码前，必须先问用户**："你的车是 TB6612 A 通道接右轮、B 通道接左轮吗？如果不是请告诉我你的左右轮接线。"
+
+**如果用户左右轮接反**（A=左/B=右），只需交换 `motor_left_set` / `motor_right_set` 的引脚映射即可，不影响 PID 算法。
+
+**右轮方向陷阱**：差速小车轮，两个电机物理上面对面安装，所以 **右轮前进方向与左轮相反**：
+- 左轮前进: `left_dir(false, true)` (BIN1=L, BIN2=H)
+- 右轮前进: `right_dir(false, true)` (AIN1=L, AIN2=H) — 对右轮来说 AIN2=H 才是前进方向
+
 ### 工程结构
 
 ```
@@ -33,16 +48,16 @@ mpu6050_clean/
 | OLED SCL | SSD1306 | PA31 | PINCM48 | I2C0_SCL | 同上 |
 | MPU6050 SDA | MPU6050 | PA10 | PINCM7 | I2C1_SDA | 硬件I2C1, 0x68, 400kHz |
 | MPU6050 SCL | MPU6050 | PA11 | PINCM8 | I2C1_SCL | 与CH340 UART0复用, 二选一 |
-| 右轮 PWM | TB6612FNG | PB15 | PINCM35 | TIMG8_C0 | PWMA, 20kHz |
-| 左轮 PWM | TB6612FNG | PB16 | PINCM36 | TIMG8_C1 | PWMB, 20kHz |
-| 右轮 AIN1 (方向) | TB6612FNG | PA13 | PINCM10 | GPIO | 右轮H桥IN1 |
-| 右轮 AIN2 (方向) | TB6612FNG | PA12 | PINCM9 | GPIO | 右轮H桥IN2 |
-| 左轮 BIN1 (方向) | TB6612FNG | PB0 | PINCM19 | GPIO | 左轮H桥IN1 |
-| 左轮 BIN2 (方向) | TB6612FNG | PB1 | PINCM20 | GPIO | 左轮H桥IN2 |
-| 编码器R A相 | MG310(霍尔) | PA15 | PINCM37 | GPIO双边沿中断 | 右轮速度 |
-| 编码器R B相 | MG310(霍尔) | PA16 | PINCM38 | GPIO输入 | 备用(方向) |
-| 编码器L A相 | MG310(霍尔) | PA17 | PINCM39 | GPIO双边沿中断 | 左轮速度 |
-| 编码器L B相 | MG310(霍尔) | PA24 | PINCM54 | GPIO输入 | 备用(方向) |
+| **右轮** PWM | TB6612FNG | PB15 | PINCM35 | TIMG8_C0 | **A通道**=PWMA, 20kHz |
+| **左轮** PWM | TB6612FNG | PB16 | PINCM36 | TIMG8_C1 | **B通道**=PWMB, 20kHz |
+| **右轮** AIN1 (方向) | TB6612FNG | PA13 | PINCM10 | GPIO | A通道H桥IN1 |
+| **右轮** AIN2 (方向) | TB6612FNG | PA12 | PINCM9 | GPIO | A通道H桥IN2 |
+| **左轮** BIN1 (方向) | TB6612FNG | PB0 | PINCM19 | GPIO | B通道H桥IN1 |
+| **左轮** BIN2 (方向) | TB6612FNG | PB1 | PINCM20 | GPIO | B通道H桥IN2 |
+| 编码器A A相 | MG310(霍尔) | PA15 | PINCM37 | GPIO/TIMA1_CH0 | **右轮** 速度, 双边沿中断 |
+| 编码器A B相 | MG310(霍尔) | PA16 | PINCM38 | GPIO/TIMA1_CH1 | **右轮** 方向(备用) |
+| 编码器B A相 | MG310(霍尔) | PA17 | PINCM39 | TIMG7_CH0 | **左轮** 速度, QEI正交编码 |
+| 编码器B B相 | MG310(霍尔) | PA24 | PINCM54 | TIMG7_CH1 | **左轮** 方向 |
 | CAL 按键 | 轻触开关 | PA26 | PINCM43 | GPIO上拉输入 | yaw校零 |
 | START 按键 | 轻触开关 | PA25 | PINCM42 | GPIO上拉输入 | 启动/停止 |
 | LED | 板载 | PB22 | PINCM53 | GPIO输出 | 状态指示 |

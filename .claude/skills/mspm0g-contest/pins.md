@@ -124,19 +124,19 @@
 
 | 硬件模块 | 型号/规格 | 天猛星引脚 | 说明 |
 |----------|----------|-----------|------|
-| **TB6612 PWMA** | 电机驱动 | PB15 (TIMG8_C0) | 左电机PWM, 20kHz |
-| **TB6612 PWMB** | | PB16 (TIMG8_C1) | 右电机PWM |
-| **TB6612 AIN1** | | PA13 | 左电机方向1 |
-| **TB6612 AIN2** | | PA12 | 左电机方向2 |
-| **TB6612 BIN1** | | PB0 | 右电机方向1 |
-| **TB6612 BIN2** | | PB1 | 右电机方向2 |
+| **TB6612 PWMA** | 电机驱动 | PB15 (TIMG8_C0) | **右电机** (A通道) PWM, 20kHz |
+| **TB6612 PWMB** | | PB16 (TIMG8_C1) | **左电机** (B通道) PWM |
+| **TB6612 AIN1** | | PA13 | **右电机** 方向1 |
+| **TB6612 AIN2** | | PA12 | **右电机** 方向2 |
+| **TB6612 BIN1** | | PB0 | **左电机** 方向1 |
+| **TB6612 BIN2** | | PB1 | **左电机** 方向2 |
 | **TB6612 STBY** | | 3.3V | 使能 |
 | **TB6612 VM** | | 电池 7.4V | 电机电源 |
 | **TB6612 VCC** | | 3.3V | 逻辑电源 |
-| **MG310 编码器A-A** | 电机编码器 | PA15 (GPIO中断) | 双边沿中断 |
-| **MG310 编码器A-B** | | PA16 (GPIO中断) | 双边沿中断 |
-| **MG310 编码器B-A** | 电机编码器 | PA17 (TIMG7_CH0) | TIMG7正交编码 |
-| **MG310 编码器B-B** | | PA24 (TIMG7_CH1) | |
+| **MG310 编码器A-A** | 电机编码器 | PA15 (GPIO中断/TIMA1_CH0) | **右轮** A相 双边沿中断 |
+| **MG310 编码器A-B** | | PA16 (GPIO中断/TIMA1_CH1) | **右轮** B相 |
+| **MG310 编码器B-A** | 电机编码器 | PA17 (TIMG7_CH0) | **左轮** A相 TIMG7正交编码 |
+| **MG310 编码器B-B** | | PA24 (TIMG7_CH1) | **左轮** B相 |
 | **TCRT5000 ×8** | 红外循迹 | PB25,PB24,PB20,PA14,PB18,PB19,PB10,PA7 | 8路ADC |
 | **MPU6050 SDA** | 六轴陀螺仪 | 待用户确认，禁止 PA10 | PA10 被 CH340 占用 |
 | **MPU6050 SCL** | | 待用户确认，禁止 PA11 | PA11 被 CH340 占用 |
@@ -190,16 +190,16 @@
 | **OLED SDA** | SSD1306 | PA28 | I2C0_SDA | 地址 0x3C |
 | **MPU6050 SCL** | MPU6050 | 待用户确认，禁止 PA11 | I2C1/软件I2C | PA11 被 CH340 占用 |
 | **MPU6050 SDA** | MPU6050 | 待用户确认，禁止 PA10 | I2C1/软件I2C | PA10 被 CH340 占用 |
-| **TB6612 PWMA** | TB6612FNG | PB15 | TIMG8_C0 | 左电机 PWM |
-| **TB6612 PWMB** | TB6612FNG | PB16 | TIMG8_C1 | 右电机 PWM |
-| **TB6612 AIN1** | TB6612FNG | PA13 | GPIO | 左电机方向1 |
-| **TB6612 AIN2** | TB6612FNG | PA12 | GPIO | 左电机方向2 |
-| **TB6612 BIN1** | TB6612FNG | PB0 | GPIO | 右电机方向1 |
-| **TB6612 BIN2** | TB6612FNG | PB1 | GPIO | 右电机方向2 |
-| **电机A 编码器 A相** | MG310 | PA15 | GPIO 双边沿中断 | TIMA1不支持QEI |
-| **电机A 编码器 B相** | MG310 | PA16 | GPIO 双边沿中断 | 软件解码AB相 |
-| **电机B 编码器 A相** | MG310 | PA17 | TIMG7_CH0 | TIMG7编码器模式 |
-| **电机B 编码器 B相** | MG310 | PA24 | TIMG7_CH1 | |
+| **TB6612 PWMA** | TB6612FNG | PB15 | TIMG8_C0 | **右电机** (A通道) PWM |
+| **TB6612 PWMB** | TB6612FNG | PB16 | TIMG8_C1 | **左电机** (B通道) PWM |
+| **TB6612 AIN1** | TB6612FNG | PA13 | GPIO | **右电机** 方向1 |
+| **TB6612 AIN2** | TB6612FNG | PA12 | GPIO | **右电机** 方向2 |
+| **TB6612 BIN1** | TB6612FNG | PB0 | GPIO | **左电机** 方向1 |
+| **TB6612 BIN2** | TB6612FNG | PB1 | GPIO | **左电机** 方向2 |
+| **电机A 编码器 A相 (右轮)** | MG310 | PA15 | GPIO双边沿 / TIMA1_CH0 | TIMA1不支持QEI, 用GPIO中断 |
+| **电机A 编码器 B相 (右轮)** | MG310 | PA16 | GPIO双边沿 / TIMA1_CH1 | 软件解码AB相 |
+| **电机B 编码器 A相 (左轮)** | MG310 | PA17 | TIMG7_CH0 | TIMG7编码器模式 |
+| **电机B 编码器 B相 (左轮)** | MG310 | PA24 | TIMG7_CH1 | |
 | **舵机1** | SG90/MG996R | PB9 | TIMA0_CH1 | 50Hz PWM |
 | **舵机2** | SG90/MG996R | PB8 | TIMA0_CH0 | 50Hz PWM |
 | **超声波 TRIG** | HC-SR04 | PA8 | GPIO OUT | |
@@ -222,8 +222,8 @@
 | I2C0 | OLED | 0x3C | ✅ 独占 |
 | I2C1 | MPU6050 | 0x68 | ✅ 独占（与OLED分离） |
 | TIMA0 | 舵机×2 (CH0,CH1) | PB8, PB9 | ✅ |
-| GPIO中断 | 电机A编码器 (PA15/PA16) | 双边沿中断 | ✅ 软件解码 |
-| TIMG7 | 电机B编码器 (CH0,CH1) | PA17, PA24 | ✅ |
+| GPIO中断 | 电机A编码器-右轮 (PA15/PA16) | 双边沿中断 / TIMA1_CH0/CH1 | ✅ 软件解码 |
+| TIMG7 | 电机B编码器-左轮 (CH0,CH1) | PA17, PA24 | ✅ |
 | TIMG8 | TB6612 PWMA/PWMB | PB15, PB16 | ✅ |
 | UART0 | CH340 调试 | PA10, PA11 | 🔒 |
 | UART1 | 蓝牙 HC-05/06 | PB6, PB7 | ✅ |
@@ -244,15 +244,15 @@
 
 ### 常用模块接线
 
-**TB6612 电机驱动：**
+**TB6612 电机驱动 (⚠️ A通道=右轮, B通道=左轮)：**
 | TB6612 | MSPM0G | 说明 |
 |--------|--------|------|
-| PWMA | PB15 (TIMG8_C0) | PWM, 20kHz |
-| PWMB | PB16 (TIMG8_C1) | PWM, 20kHz |
-| AIN1 | PA13 | 方向 1 |
-| AIN2 | PA12 | 方向 2 |
-| BIN1 | PB0 | 方向 1 |
-| BIN2 | PB1 | 方向 2 |
+| PWMA | PB15 (TIMG8_C0) | **右轮** PWM, 20kHz |
+| PWMB | PB16 (TIMG8_C1) | **左轮** PWM, 20kHz |
+| AIN1 | PA13 | **右轮** 方向1 |
+| AIN2 | PA12 | **右轮** 方向2 |
+| BIN1 | PB0 | **左轮** 方向1 |
+| BIN2 | PB1 | **左轮** 方向2 |
 | STBY | 3.3V | 使能 |
 | VM | 电池+ (7~12V) | 电机电源 |
 | VCC | 3.3V | 逻辑电源 |
