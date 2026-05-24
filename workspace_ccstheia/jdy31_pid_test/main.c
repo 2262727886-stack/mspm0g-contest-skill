@@ -75,7 +75,7 @@ static bool button_pressed(uint32_t port, uint32_t pin)
 /* 发送单字节 (阻塞) */
 static void bt_tx_byte(char c)
 {
-    while (DL_UART_isTXFIFOFull(BT_UART));
+    while (DL_UART_Main_isTXFIFOFull(BT_UART));
     DL_UART_Main_transmitData(BT_UART, (uint8_t)c);
 }
 
@@ -237,7 +237,7 @@ int main(void)
     while (1) {
         /* ---- 蓝牙接收 (只收不回声, 完整行后发ACK) ---- */
         bool rx_activity = false;
-        while (!DL_UART_isRXFIFOEmpty(BT_UART)) {
+        while (!DL_UART_Main_isRXFIFOEmpty(BT_UART)) {
             rx_activity = true;
             char c = (char)DL_UART_Main_receiveData(BT_UART);
 
