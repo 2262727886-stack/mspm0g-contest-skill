@@ -1,0 +1,68 @@
+/**
+ * JDY-31 蓝牙 PID 调参最小测试单元
+ *
+ * UART1 PB6/PB7 → JDY-31 蓝牙 (115200)
+ * I2C0 PA28/PA31 → OLED SSD1306 (回显数据)
+ * GPIO PB22 → LED 状态指示
+ * GPIO PA25 → 按键 (启动/停止)
+ * GPIO PA26 → 按键 (发送测试数据)
+ */
+//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
+//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
+
+const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1  = GPIO.addInstance();
+const GPIO2  = GPIO.addInstance();
+const GPIO3  = GPIO.addInstance();
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+const I2C    = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C1   = I2C.addInstance();
+const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1  = UART.addInstance();
+const Board  = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+GPIO1.$name                         = "GPIO";
+GPIO1.associatedPins[0].$name       = "LED";
+GPIO1.associatedPins[0].pin.$assign = "PB22";
+
+GPIO2.$name                         = "CAL";
+GPIO2.associatedPins[0].$name       = "KEY";
+GPIO2.associatedPins[0].pin.$assign = "PA26";
+GPIO2.associatedPins[0].direction   = "INPUT";
+
+GPIO3.$name                         = "START";
+GPIO3.associatedPins[0].$name       = "BTN";
+GPIO3.associatedPins[0].pin.$assign = "PA25";
+GPIO3.associatedPins[0].direction   = "INPUT";
+
+SYSCTL.forceDefaultClkConfig = true;
+
+I2C1.$name                     = "I2C_OLED";
+I2C1.peripheral.sdaPin.$assign = "PA28";
+I2C1.peripheral.sclPin.$assign = "PA31";
+I2C1.basicEnableController     = true;
+I2C1.basicControllerBusSpeed   = 400000;
+I2C1.advControllerTXFIFOTRIG   = "BYTES_1";
+I2C1.sdaPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric0";
+I2C1.sclPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric1";
+
+UART1.$name                            = "UART_JDY31";
+UART1.targetBaudRate                   = 115200;
+UART1.peripheral.rxPin.$assign         = "PB7";
+UART1.peripheral.txPin.$assign         = "PB6";
+UART1.txPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric2";
+UART1.txPinConfig.direction            = scripting.forceWrite("OUTPUT");
+UART1.txPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+UART1.txPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+UART1.txPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+UART1.rxPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric3";
+UART1.rxPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+UART1.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+UART1.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+
+Board.peripheral.$suggestSolution          = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution = "PA20";
+Board.peripheral.swdioPin.$suggestSolution = "PA19";
+I2C1.peripheral.$suggestSolution           = "I2C0";
+UART1.peripheral.$suggestSolution          = "UART1";
+SYSCTL.peripheral.$suggestSolution         = "SYSCTL";
