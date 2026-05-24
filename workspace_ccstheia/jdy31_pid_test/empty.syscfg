@@ -47,7 +47,7 @@ I2C1.sdaPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric0";
 I2C1.sclPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric1";
 
 UART1.$name                            = "UART_JDY31";
-UART1.targetBaudRate                   = 115200;
+UART1.targetBaudRate                   = 9600;
 UART1.peripheral.rxPin.$assign         = "PB7";
 UART1.peripheral.txPin.$assign         = "PB6";
 UART1.txPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric2";

@@ -4,7 +4,7 @@
  * 硬件: MSPM0G3507 + JDY-31 (UART1 PB6/PB7) + OLED (I2C0 PA28/PA31)
  *
  * 功能:
- *   1. UART1 115200 收发 — 上位机(PC蓝牙/手机)发PID命令
+ *   1. UART1 9600 收发 — 上位机(PC蓝牙/手机)发PID命令
  *   2. OLED 实时回显 — 收到的命令 + PID参数值
  *   3. 蓝牙回声 — 把收到的命令原样发回, 确认通信正常
  *   4. 按键:
@@ -26,14 +26,11 @@
  *   JDY-31 GND → GND
  *   JDY-31 STATE → PA14 (可选, 高=已连接)
  *
- * JDY-31 V1.3 AT 预设 (先用USB-TTL在9600下配置, 再改为115200使用):
- *   1. USB-TTL接JDY-31, 串口助手9600 8N1, 发送AT命令必须跟 \r\n
- *   2. AT+BAUD8               → 设波特率115200 (默认9600)
- *   3. AT+NAME小车主控         → 设蓝牙广播名 (最长18字节,中文约6字)
- *   4. AT+PIN1234             → 设配对密码 (默认1234)
- *   5. AT+ENLOG0              → 关闭状态输出 (避免连接时乱码干扰PID解析)
- *   6. AT+RESET               → 软复位生效
- *   7. 串口助手切115200 → 重新打开 → 可用AT+BAUD验证波特率已改为8
+ * JDY-31 V1.3 AT 预设 (默认9600, 直接用不配AT):
+ *   1. 出厂默认 9600 8N1, 密码1234, 名称JDY-31-SPP
+ *   2. 如需改名: AT+NAME小车主控     (最长18字节)
+ *   3. 如需关状态日志: AT+ENLOG0     (推荐, 避免连接时乱码)
+ *   4. 串口助手/蓝牙COM口 9600 8N1 即可通信
  */
 
 #include "ti_msp_dl_config.h"
@@ -46,7 +43,7 @@
 
 /* ========================= 外设引用 ========================= */
 #define BT_UART            UART_JDY31_INST
-#define BT_BAUD            115200U
+#define BT_BAUD            9600U
 
 /* ========================= PID 参数 (全局, 蓝牙实时修改) ========================= */
 float    g_kp       = 2.5f;    /* Kp ×0.1 → 实际值0.25 (发送P25=2.5) */
@@ -217,7 +214,7 @@ int main(void)
     OLED_Init();
     OLED_Clear();
     OLED_Puts(0, 0, "JDY31 BT INIT...");
-    OLED_Puts(1, 0, "UART1 115200");
+    OLED_Puts(1, 0, "UART1 9600");
 
     /* LED 初始状态: 亮起表示上电 */
     DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
