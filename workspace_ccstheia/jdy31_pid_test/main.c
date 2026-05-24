@@ -221,60 +221,51 @@ int main(void)
     delay_ms(500);
     DL_GPIO_clearPins(GPIO_PORT, GPIO_LED_PIN);
 
-    /* 上电问候帧 → 蓝牙 (上位机看到表示通信OK) */
-    bt_tx_str("JDY31 PID Ready\r\n");
-    bt_tx_str("CMD: Px Ix Dx Tx Bx\r\n");
-    bt_tx_ack();
+    /* 上电问候帧 */
+    bt_tx_str("JDY31 Ready\r\n");
 
     OLED_Clear();
     oled_update();
 
-    /* 按键边沿检测 */
+    /* 按键边沿 */
     bool last_pa25 = false;
     bool last_pa26 = false;
 
-    /* 主循环 */
+    /* 心跳计数: 每5秒发一次证明链路存活 */
+    uint16_t tick = 0;
+
     while (1) {
-        /* ---- 蓝牙接收 ---- */
+        /* ---- 蓝牙接收 (只收不回声, 完整行后发ACK) ---- */
         bool rx_activity = false;
         while (!DL_UART_isRXFIFOEmpty(BT_UART)) {
             rx_activity = true;
             char c = (char)DL_UART_Main_receiveData(BT_UART);
 
-            /* 缓存到行缓冲区 */
             if (rx_idx < RX_BUF_SIZE - 1) {
                 rx_buf[rx_idx++] = c;
                 rx_buf[rx_idx] = '\0';
 
-                /* 遇到换行 → 解析本条命令 */
                 if (c == '\n' || c == '\r') {
-                    /* 保存到显示缓冲 */
                     int copy_len = (rx_idx < 31) ? rx_idx : 30;
                     memcpy(last_cmd, rx_buf, copy_len);
                     last_cmd[copy_len] = '\0';
                     cmd_updated = true;
 
-                    /* 解析PID命令 */
                     bt_parse_cmd(rx_buf, rx_idx);
                     rx_idx = 0;
                 }
             } else {
-                /* 缓冲区满 → 丢弃并重置 */
                 rx_idx = 0;
             }
-
-            /* 回声: 收什么发什么 (方便串口助手验证) */
-            bt_tx_byte(c);
         }
 
-        /* LED 跟随 RX 活动 (有数据时闪烁) */
+        /* LED: RX时快闪, 空闲时心跳慢闪 */
         if (rx_activity) {
-            led_on = !led_on;
-            if (led_on) DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
-            else        DL_GPIO_clearPins(GPIO_PORT, GPIO_LED_PIN);
+            DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
+            led_on = true;
         }
 
-        /* ---- 按键 PA25: 发送 P5 (Kp=0.5) ---- */
+        /* ---- 按键 PA25 ---- */
         bool pa25 = button_pressed((uint32_t)START_PORT, START_BTN_PIN);
         if (!last_pa25 && pa25) {
             bt_tx_str("P5\r\n");
@@ -283,7 +274,7 @@ int main(void)
         }
         last_pa25 = pa25;
 
-        /* ---- 按键 PA26: 发送 I8 (Ki=0.08) ---- */
+        /* ---- 按键 PA26 ---- */
         bool pa26 = button_pressed((uint32_t)CAL_PORT, CAL_KEY_PIN);
         if (!last_pa26 && pa26) {
             bt_tx_str("I8\r\n");
@@ -292,12 +283,23 @@ int main(void)
         }
         last_pa26 = pa26;
 
-        /* ---- OLED 刷新 (约 5Hz) ---- */
+        /* ---- OLED 约每秒刷新 ---- */
         static uint8_t oled_div = 0;
-        if (++oled_div >= 200U) {  /* 200 × 10ms = 2s 刷新一次 */
+        if (++oled_div >= 100U) {
             oled_div = 0;
             oled_update();
             cmd_updated = false;
+        }
+
+        /* ---- 心跳: 每5秒发一次, LED灭 ---- */
+        tick = (uint16_t)(tick + 1U);
+        if (tick >= 500U) {  /* 500 × 10ms = 5s */
+            tick = 0;
+            bt_tx_str(".\r\n");     /* 一个点表示活着 */
+            led_on = false;
+        }
+        if (!led_on) {
+            DL_GPIO_clearPins(GPIO_PORT, GPIO_LED_PIN);
         }
 
         delay_ms(10);
