@@ -220,9 +220,9 @@ int main(void)
     OLED_Puts(1, 0, "UART1 115200");
 
     /* LED 初始状态: 亮起表示上电 */
-    DL_GPIO_setPins(GPIO_LED_PORT, GPIO_LED_PIN);
+    DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
     delay_ms(500);
-    DL_GPIO_clearPins(GPIO_LED_PORT, GPIO_LED_PIN);
+    DL_GPIO_clearPins(GPIO_PORT, GPIO_LED_PIN);
 
     /* 上电问候帧 → 蓝牙 (上位机看到表示通信OK) */
     bt_tx_str("JDY31 PID Ready\r\n");
@@ -273,8 +273,8 @@ int main(void)
         /* LED 跟随 RX 活动 (有数据时闪烁) */
         if (rx_activity) {
             led_on = !led_on;
-            if (led_on) DL_GPIO_setPins(GPIO_LED_PORT, GPIO_LED_PIN);
-            else        DL_GPIO_clearPins(GPIO_LED_PORT, GPIO_LED_PIN);
+            if (led_on) DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
+            else        DL_GPIO_clearPins(GPIO_PORT, GPIO_LED_PIN);
         }
 
         /* ---- 按键 PA25: 发送 P5 (Kp=0.5) ---- */
