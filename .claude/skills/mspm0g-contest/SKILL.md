@@ -195,3 +195,48 @@ Pin/API traps:
 - ADC 输入电压范围 0~VREF，超出会损坏
 - 中断回调函数中不要做耗时操作，只置标志位
 - 电机编码器线长尽量短，必要时加屏蔽
+
+---
+
+## 2026-05 IMU601 UART + OLED + TB6612 Yaw PID Turn Lessons
+
+Use this section first when the user is using the Tianmengxing MSPM0G3507 board with the ATK/正点原子 IMU601 module and asks for yaw display, zero-drift calibration, VOFA curves, or a 90-degree turn using motors.
+
+Verified hardware path:
+- IMU601 is **UART**, not I2C.
+- IMU601 TX -> MSPM0G PA1 / UART0_RX.
+- IMU601 RX -> MSPM0G PA0 / UART0_TX.
+- OLED SSD1306 I2C0: PA28=SDA, PA31=SCL, address 0x3C.
+- Debug serial for VOFA can use PA10 as software UART TX. Use 9600 baud if 115200 is garbled.
+- PA25: gyro zero calibration key, active low with pull-up.
+- PA26: start key for one-shot yaw turn, active low with pull-up.
+
+Verified TB6612FNG mapping on Tianmengxing car:
+- Right wheel / A channel: PWMA=PB15/TIMG8_C0, AIN1=PA13, AIN2=PA12.
+- Left wheel / B channel: PWMB=PB16/TIMG8_C1, BIN1=PB0, BIN2=PB1.
+- PWM period tested with `MOTOR_PWM_MAX=2133`. Compare value uses inverted duty: `compare = MOTOR_PWM_MAX - duty`.
+- Start the PWM counter explicitly after SysConfig init: `DL_TimerG_startCounter(MOTOR_PWM_INST)`.
+
+Verified IMU601 ATKP settings:
+- Upload frames use `55 55`; ACK frames use `55 AF`.
+- Attitude frame msg id: `0x01`; gyro/acc frame msg id: `0x03`.
+- Set `REG_UPSET=0x0005` to upload attitude + gyro/acc so yaw and gyro are both available.
+- Set `REG_UPRATE=0x0002` for a practical update rate.
+- Parse UART0 in interrupt into a ring buffer, then parse ATKP frames in the main loop. Do not parse heavily inside the ISR.
+
+Verified control pattern for one-shot clockwise 90-degree turn:
+- Keep OLED nonblocking; call `OLED_Service()` every main-loop iteration.
+- Use SysTick 1ms and run yaw control every 20ms.
+- On PA26 press: `targetYaw = wrap_180(currentYaw + 90.0f)`.
+- PID output: `Kp * yawError + Ki * integral - Kd * gyroZ`.
+- Apply left wheel `+pwm`, right wheel `-pwm` for in-place clockwise turn. If the robot turns the wrong direction, invert the target sign or swap motor sign.
+- Stop condition should include a deadband and settle count; verified stable values:
+  - near zone: `abs(error) < 12 deg`
+  - near PWM min/max: `70 / 260`
+  - normal PWM min/max: `180 / 620`
+  - stop when `abs(error) <= 3 deg` and `abs(gyroZ) <= 25 dps` for 3 control ticks
+- If the robot reaches 90 degrees but shakes, reduce near-zone PWM and/or widen stop deadband before increasing PID gains.
+- Always test first with the wheels lifted. Calibrate gyro zero while stationary before running the turn.
+
+Reusable example:
+- See `examples/imu601_yaw_pid_90deg_turn.md`.

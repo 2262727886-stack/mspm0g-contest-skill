@@ -1165,3 +1165,105 @@ B800 T42 P5 I8 D0     ← 推荐起始值
 B999 T999             ← 测最大计数(不要长时间满功率)
 B800 T82 P5 I8 D0     ← 20ms采样用
 ```
+
+---
+
+## IMU601 Yaw 角转向 PID：PA26 一键顺时针 90 度
+
+### 已验证场景
+
+- MCU: MSPM0G3507 / Tianmengxing board
+- IMU: ATK/正点原子 IMU601, UART0 on PA0/PA1
+- Motor driver: TB6612FNG
+- Start key: PA26, active low
+- Gyro zero key: PA25, active low
+- Result: PA26 pressed once -> robot turns clockwise 90 degrees -> stops without shaking
+
+Note: older MPU6050 yaw examples in this file may use PA26 as yaw-zero key. For the verified IMU601 car setup, use **PA25 for gyro zero** and **PA26 for turn start**.
+
+### 关键参数
+
+```c
+#define MOTOR_PWM_MAX           (2133U)
+#define TURN_CONTROL_PERIOD_MS  (20U)
+#define TURN_TARGET_DEG         (90.0f)
+#define TURN_KP                 (9.0f)
+#define TURN_KI                 (0.06f)     /* ⚠️ 建议设0, 积分导致来回摆 */
+#define TURN_KD                 (0.7f)
+#define TURN_PWM_MIN            (180)       /* ⚠️ 不能太低, 低于摩擦力会卡死 */
+#define TURN_PWM_MAX            (620)
+#define TURN_NEAR_ERR_DEG       (12.0f)
+#define TURN_NEAR_PWM_MIN       (70)        /* ⚠️ 必须≥远区MIN, 否则进近区卡死 */
+#define TURN_NEAR_PWM_MAX       (260)
+#define TURN_STOP_ERR_DEG       (3.0f)
+#define TURN_STOP_GYRO_DPS      (25.0f)
+#define TURN_SETTLE_TICKS       (3U)
+#define TURN_INTEGRAL_LIMIT     (600.0f)
+#define TURN_TIMEOUT_MS         (3000U)     /* ⚠️ 超时保护: 防电机卡死系统挂起 */
+```
+
+### ⚠️ yaw 方向铁律
+
+IMU601 yaw: **逆时针为正(+), 顺时针为负(-)**。
+
+```c
+/* ✅ 顺时针: 目标 = 当前 - 90 */
+targetYaw = wrap_angle_180(currentYaw - 90.0f);
+
+/* ❌ 逆时针: 这是 +90 */
+targetYaw = wrap_angle_180(currentYaw + 90.0f);
+```
+
+### 控制公式
+
+```c
+targetYaw = wrap_angle_180(currentYaw - 90.0f);  /* ⚠️ 顺时针减 */
+errorDeg = wrap_angle_180(currentYaw - targetYaw); /* ⚠️ 当前-目标 */
+integral += errorDeg * 0.02f;
+output = TURN_KP * errorDeg + TURN_KI * integral + TURN_KD * gyroZ; /* ⚠️ +Kd */
+```
+
+### ⚠️ 最小 PWM 陷阱
+
+`TURN_PWM_MIN=0` → PID 输出降到摩擦力以下 → 电机停转 → 误差卡住 → 停车条件不满足 → **系统死锁**。
+
+`TURN_NEAR_PWM_MIN < TURN_PWM_MIN` → 进近目标区时 PWM 突降 → 也可能卡死。
+
+**规则**: 近目标区最小 PWM 必须 ≥ 远区最小 PWM，都必须大于电机摩擦死区。超时保护必须有。
+
+输出到电机：
+
+```c
+motor_left_set(pwm);
+motor_right_set(-pwm);
+```
+
+如果实车方向相反，优先把 `TURN_TARGET_DEG` 改成 `-90.0f`，或交换左右电机符号。
+
+### 防抖停车经验
+
+最容易出问题的是“已经到 90 度但还在抖”。原因通常是误差很小时仍然强制使用较大的最小 PWM，导致小车在目标附近反复追赶。
+
+已验证解决方法：
+- 进入近目标区后降低 PWM 下限和上限：`12 deg` 内使用 `70~260`
+- 停止死区放宽到 `3 deg`
+- 角速度阈值放宽到 `25 dps`
+- 连续满足 3 个控制周期后停车
+- 停车时必须清零积分项
+
+调参顺序：
+1. 若到 90 度附近抖动：先降低 `TURN_NEAR_PWM_MIN`，再增大 `TURN_STOP_ERR_DEG`
+2. 若转不到角度就停：减小 `TURN_STOP_ERR_DEG` 或提高 `TURN_NEAR_PWM_MIN`
+3. 若冲过头明显：降低 `TURN_KP` 或增大 `TURN_KD`
+4. 若起步转不动：提高 `TURN_PWM_MIN`
+
+### 工程注意
+
+- OLED 必须非阻塞刷新，否则影响 IMU 接收和控制周期。
+- IMU UART RX 用中断搬运到 ring buffer，主循环解析。
+- SysTick 提供 1ms 时间基，PID 服务函数每 20ms 运行一次。
+- TB6612 的 PWM compare 使用反相占空比：`compare = MOTOR_PWM_MAX - duty`。
+- TIMG8 PWM 由 SysConfig 生成后，需要在代码里调用 `DL_TimerG_startCounter(MOTOR_PWM_INST)`。
+- 实车首次测试必须架空车轮，先 PA25 静止校准，再 PA26 启动转向。
+
+完整复用说明见 `examples/imu601_yaw_pid_90deg_turn.md`。
