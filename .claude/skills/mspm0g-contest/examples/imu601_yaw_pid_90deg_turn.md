@@ -90,6 +90,33 @@ Verified stable starting values:
 #define TURN_STOP_GYRO_DPS      (25.0f)
 #define TURN_SETTLE_TICKS       (3U)
 #define TURN_INTEGRAL_LIMIT     (600.0f)
+#define TURN_TIMEOUT_MS         (3000U)     /* ⚠️ 超时保护: 防卡死 */
+```
+
+## ⚠️ yaw 方向铁律
+
+IMU601 yaw: **逆时针为正(+), 顺时针为负(-)**。
+
+顺时针 90° 目标 = `currentYaw - 90`，不是 `+90`！
+
+```c
+/* ✅ 正确: 顺时针 */
+targetYaw = wrap_angle_180(currentYaw - TURN_TARGET_DEG);
+
+/* ❌ 错误: 这是逆时针 */
+targetYaw = wrap_angle_180(currentYaw + TURN_TARGET_DEG);
+```
+
+## ⚠️ 误差公式
+
+误差 = 当前 - 目标（不是 目标 - 当前）：
+
+```c
+/* ✅ 正确: err>0 表示还没到目标, 需要继续顺时针转 */
+errorDeg = wrap_angle_180(currentYaw - targetYaw);
+
+/* ❌ 错误: 符号反了 */
+errorDeg = wrap_angle_180(targetYaw - currentYaw);
 ```
 
 ## Control Loop
@@ -99,20 +126,26 @@ Configure SysTick at 1 ms. In the SysTick ISR, increment a tick counter. The mai
 On PA26 press:
 
 ```c
-targetYaw = wrap_angle_180(currentYaw + TURN_TARGET_DEG);
+targetYaw = wrap_angle_180(currentYaw - TURN_TARGET_DEG); /* ⚠️ 顺时针减 */
 integral = 0.0f;
+turnStartMs = g_millis;  /* 超时保护计时 */
 turnActive = true;
 ```
 
 Every control tick:
 
 ```c
-errorDeg = wrap_angle_180(targetYaw - currentYaw);
+/* 超时保护: 防止电机卡死导致系统挂起 */
+if (g_millis - turnStartMs >= TURN_TIMEOUT_MS) {
+    turnActive = false; motor_stop(); return;
+}
+
+errorDeg = wrap_angle_180(currentYaw - targetYaw); /* ⚠️ 当前-目标 */
 integral += errorDeg * 0.02f;
 // clamp integral to prevent windup
 if (integral >  TURN_INTEGRAL_LIMIT) integral =  TURN_INTEGRAL_LIMIT;
 if (integral < -TURN_INTEGRAL_LIMIT) integral = -TURN_INTEGRAL_LIMIT;
-output = TURN_KP * errorDeg + TURN_KI * integral - TURN_KD * gyroZ;
+output = TURN_KP * errorDeg + TURN_KI * integral + TURN_KD * gyroZ; /* ⚠️ +Kd: 顺时针gyroZ为负, 起阻尼作用 */
 pwm = clamp_turn_pwm(output, errorDeg);
 motor_left_set(pwm);
 motor_right_set(-pwm);
@@ -206,9 +239,24 @@ Robot cannot start turning:
 
 Robot turns the wrong direction:
 
+- **⚠️ IMU601 yaw: 顺时针为负!** 目标用 `currentYaw - 90`，不是 `+90`
 - Invert `TURN_TARGET_DEG`
 - Swap left/right PWM signs
 - Confirm A channel is right wheel and B channel is left wheel
+
+Robot oscillates back and forth at target:
+
+- **根因**: 最小 PWM 强制电机不停 → 冲过头 → 反向冲 → 循环
+- Set `TURN_KI = 0` (纯 PD, 积分只添乱)
+- Near-target minimum PWM must be ≥ far-zone minimum PWM (别设太低)
+- Add timeout protection (`TURN_TIMEOUT_MS`) to prevent infinite loop
+
+Robot gets stuck before reaching 90 degrees:
+
+- **根因**: 近目标区最小 PWM 太低 → 低于电机摩擦力 → 卡死
+- `TURN_NEAR_PWM_MIN` must be ≥ `TURN_PWM_MIN` (建议都设 120)
+- Stop condition won't trigger if motor is stalled (error stuck > 3°)
+- Timeout forces stop → back to IDLE
 
 Yaw only changes while moving:
 

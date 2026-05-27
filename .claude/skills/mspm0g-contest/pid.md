@@ -1188,27 +1188,48 @@ Note: older MPU6050 yaw examples in this file may use PA26 as yaw-zero key. For 
 #define TURN_CONTROL_PERIOD_MS  (20U)
 #define TURN_TARGET_DEG         (90.0f)
 #define TURN_KP                 (9.0f)
-#define TURN_KI                 (0.06f)
+#define TURN_KI                 (0.06f)     /* ⚠️ 建议设0, 积分导致来回摆 */
 #define TURN_KD                 (0.7f)
-#define TURN_PWM_MIN            (180)
+#define TURN_PWM_MIN            (180)       /* ⚠️ 不能太低, 低于摩擦力会卡死 */
 #define TURN_PWM_MAX            (620)
 #define TURN_NEAR_ERR_DEG       (12.0f)
-#define TURN_NEAR_PWM_MIN       (70)
+#define TURN_NEAR_PWM_MIN       (70)        /* ⚠️ 必须≥远区MIN, 否则进近区卡死 */
 #define TURN_NEAR_PWM_MAX       (260)
 #define TURN_STOP_ERR_DEG       (3.0f)
 #define TURN_STOP_GYRO_DPS      (25.0f)
 #define TURN_SETTLE_TICKS       (3U)
 #define TURN_INTEGRAL_LIMIT     (600.0f)
+#define TURN_TIMEOUT_MS         (3000U)     /* ⚠️ 超时保护: 防电机卡死系统挂起 */
+```
+
+### ⚠️ yaw 方向铁律
+
+IMU601 yaw: **逆时针为正(+), 顺时针为负(-)**。
+
+```c
+/* ✅ 顺时针: 目标 = 当前 - 90 */
+targetYaw = wrap_angle_180(currentYaw - 90.0f);
+
+/* ❌ 逆时针: 这是 +90 */
+targetYaw = wrap_angle_180(currentYaw + 90.0f);
 ```
 
 ### 控制公式
 
 ```c
-targetYaw = wrap_angle_180(currentYaw + 90.0f);
-errorDeg = wrap_angle_180(targetYaw - currentYaw);
+targetYaw = wrap_angle_180(currentYaw - 90.0f);  /* ⚠️ 顺时针减 */
+errorDeg = wrap_angle_180(currentYaw - targetYaw); /* ⚠️ 当前-目标 */
 integral += errorDeg * 0.02f;
-output = TURN_KP * errorDeg + TURN_KI * integral - TURN_KD * gyroZ;
+output = TURN_KP * errorDeg + TURN_KI * integral + TURN_KD * gyroZ; /* ⚠️ +Kd */
 ```
+
+### ⚠️ 最小 PWM 陷阱
+
+`TURN_PWM_MIN=0` → PID 输出降到摩擦力以下 → 电机停转 → 误差卡住 → 停车条件不满足 → **系统死锁**。
+
+`TURN_NEAR_PWM_MIN < TURN_PWM_MIN` → 进近目标区时 PWM 突降 → 也可能卡死。
+
+**规则**: 近目标区最小 PWM 必须 ≥ 远区最小 PWM，都必须大于电机摩擦死区。超时保护必须有。
 
 输出到电机：
 
