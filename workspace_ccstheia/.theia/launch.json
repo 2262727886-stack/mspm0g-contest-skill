@@ -1,0 +1,59 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "test_2",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "test_2",
+                "resourceId": "/test_2"
+            }
+        },
+        {
+            "name": "servo_test",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "servo_test",
+                "resourceId": "/servo_test"
+            }
+        },
+        {
+            "name": "mpu6050",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "mpu6050",
+                "resourceId": "/mpu6050"
+            }
+        },
+        {
+            "name": "mpu6050_clean",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "mpu6050_clean",
+                "resourceId": "/mpu6050_clean"
+            }
+        },
+        {
+            "name": "jdy31_pid_test",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "jdy31_pid_test",
+                "resourceId": "/jdy31_pid_test"
+            }
+        },
+        {
+            "name": "imu601",
+            "type": "ccs-debug",
+            "request": "launch",
+            "projectInfo": {
+                "name": "imu601",
+                "resourceId": "/imu601"
+            }
+        }
+    ]
+}

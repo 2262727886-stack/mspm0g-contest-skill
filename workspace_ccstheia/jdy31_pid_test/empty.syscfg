@@ -1,7 +1,7 @@
 /**
  * JDY-31 蓝牙 PID 调参最小测试单元
  *
- * UART1 PB6/PB7 → JDY-31 蓝牙 (115200)
+ * UART1 PB6/PB7 → JDY-31 蓝牙 (9600)
  * I2C0 PA28/PA31 → OLED SSD1306 (回显数据)
  * GPIO PB22 → LED 状态指示
  * GPIO PA25 → 按键 (启动/停止)

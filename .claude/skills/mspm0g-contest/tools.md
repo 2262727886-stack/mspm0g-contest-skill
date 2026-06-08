@@ -665,21 +665,167 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
 
 ## 十三、烧录与调试工具链
 
-### 三种烧录方式
+> **⚠️ 重要：烧录前必须自行配置引脚！**
+>
+> 本节所有代码和脚本中的引脚分配均为 **示例**，你必须根据自己的实际硬件接线修改 SysConfig (.syscfg) 中的引脚配置。
+> **烧录只是把固件写入芯片，引脚错了一样能烧进去，但外设不会工作甚至可能短路！**
+>
+> 每次拿到新工程或复制模板后：
+> 1. 打开 `.syscfg` 文件，逐项检查每个外设的引脚是否与你的实际接线一致
+> 2. 特别注意：电机 PWM、编码器、I2C、UART 的引脚
+> 3. 禁用引脚 (PA2~PA6, PA19/PA20) 不要分配给任何外设
+> 4. 修改后重新编译 (Ctrl+B) 再烧录
+
+### 烧录方式总览
 
 | 方式 | 工具 | 接口 | 速度 | 推荐度 | 文件格式 |
 |------|------|------|------|--------|----------|
-| **XDS110** | TI XDS110 + UniFlash/CCS | SWD (PA19/PA20) | 快 | ⭐⭐⭐ 强烈推荐 | .out |
+| **CCS Theia IDE** | CCS Theia 内置调试器 | SWD (PA19/PA20) | 快 | ⭐⭐⭐ 最简单 | .out |
+| **XDS110 命令行** | DSLite + UniFlash | SWD (PA19/PA20) | 快 | ⭐⭐⭐ 脚本化 | .out |
 | **J-Link** | SEGGER J-Link + UniFlash | SWD (PA19/PA20) | 快 | ⭐⭐⭐ | .out |
-| **串口(BSL)** | UniFlash + BSL ROM | PA0(TX)/PA1(RX) (开漏) | 慢(920B/s) | ✅ **已验证可用** | .txt (tiarmhex生成) |
+| **串口(BSL)** | UniFlash + BSL ROM | PA0(TX)/PA1(RX) (开漏) | 慢(920B/s) | ✅ 无需调试器 | .txt |
 
-**✅ BSL 串口烧录实测验证 (2025-05-18)：**
-- UniFlash 9.5.0 + COM5 + MSPM0G3507 烧录成功，程序正常执行
-- ⚠️ 两个误报错误可忽略：`Image Loading Failed` 和 `Verification Failed for Datablock` — 固件实际已烧入
-- 小固件(<1KB) 触发 `Data Block Size less than 1KB` 假警告，不影响运行
-- **推荐 BSL 作为 XDS110 到货前的可靠替代方案**
+### 方式一：CCS Theia IDE 烧录 (最简单)
 
-### J-Link 烧录步骤
+```
+1. 用 XDS110 连接天猛星 SWD 接口:
+   XDS110 TMS/SWDIO → PA19
+   XDS110 TCK/SWCLK → PA20
+   XDS110 3V3       → 3.3V
+   XDS110 GND       → GND
+
+2. CCS Theia 打开工程文件夹
+
+3. 编译: Ctrl+B
+
+4. 烧录: 点击左侧 Debug 按钮 (或 F5)
+   → 自动编译、烧录、运行
+   → 无需按 BSL/RST 键
+
+5. CCS Theia 会自动使用 targetConfigs/ 下的 .ccxml 配置
+```
+
+**CCS Theia launch.json 配置** (`.theia/launch.json`)：
+
+每个工程在 `.theia/launch.json` 中有一个调试配置项，格式如下：
+
+```json
+{
+    "name": "mpu6050_clean",
+    "type": "ccs-debug",
+    "request": "launch",
+    "projectInfo": {
+        "name": "mpu6050_clean",
+        "resourceId": "/mpu6050_clean"
+    }
+}
+```
+
+> 如果新工程在 Debug 按钮下拉中找不到，手动在 `.theia/launch.json` 的 `configurations` 数组中添加一项即可。
+
+### 方式二：XDS110 命令行烧录 (脚本化)
+
+XDS110 烧录固定 ~4 秒开销（TI 调试服务器初始化），实际烧录 <100ms。
+
+**核心 DSLite 命令：**
+```bash
+DSLite flash -c <工程目录>/targetConfigs/MSPM0G3507.ccxml \
+    -s "AutoResetOnConnect=true" \
+    -s "VerifyAfterProgramLoad=2" \
+    <工程目录>/Debug/<工程名>.out
+```
+
+**关键设置说明：**
+| 设置 | 作用 |
+|------|------|
+| `AutoResetOnConnect=true` | 连接前自动复位芯片，避免超时 |
+| `VerifyAfterProgramLoad=2` | 跳过烧录后验证，节省时间 |
+
+**DSLite 路径（随 UniFlash 版本变化）：**
+```
+C:\ti\uniflash_9.5.0\deskdb\content\TICloudAgent\win\ccs_base\DebugServer\bin\DSLite.exe
+```
+
+**CCXML 目标配置文件：**
+- 工程内自带: `<工程>/targetConfigs/MSPM0G3507.ccxml`
+- UniFlash 内置: `<UniFlash>/scripting/examples/debugger/mspm0g3507/mspm0g3507.ccxml`
+- 两者等效，都配置为 XDS110 + SWD + MSPM0G3507
+
+### 方式三：快速编译+烧录脚本
+
+**⚠️ 脚本中的路径必须按你的实际安装位置修改！** 包括：
+- `PROJ` — CCS 工程目录
+- `CC` — tiarmclang.exe 路径
+- `DSLITE` — DSLite.exe 路径
+- `SDK` — MSPM0 SDK source 目录
+
+**Windows 批处理 (fast_flash.bat)：**
+```bat
+@echo off
+rem ===== ⚠️ 用户配置区: 按实际安装路径修改 =====
+set PROJ=C:\Users\Administrator\workspace_ccstheia\mpu6050_clean
+set CC=C:\ti\ccs2020\ccs\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\bin\tiarmclang.exe
+set DSLITE=C:\ti\uniflash_9.5.0\deskdb\content\TICloudAgent\win\ccs_base\DebugServer\bin\DSLite.exe
+set CCXML=%PROJ%\targetConfigs\MSPM0G3507.ccxml
+set SDK=C:\ti\mspm0_sdk_2_10_00_04\source
+
+cd /d "%PROJ%\Debug"
+
+rem ===== ⚠️ 按你的工程修改源文件列表 =====
+for %%s in (main pid_ctrl oled mpu_port i2c_utils delay inv_mpu inv_mpu_dmp_motion_driver) do (
+    if "..\%%s.c" is newer than "%%s.o" (
+        echo CC %%s.c
+        "%CC%" -c -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -I"%PROJ%" -I"%PROJ%\Debug" -I"%SDK%\third_party\CMSIS\Core\Include" -I"%SDK%" -gdwarf-3 -Wall -o"%%s.o" "..\%%s.c" 2>nul
+    )
+)
+
+rem 链接
+echo LINK
+"%CC%" -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -Wl,-i"%SDK%" -Wl,-i"%PROJ%" -Wl,-i"%PROJ%\Debug\syscfg" -Wl,-i"C:\ti\ccs2020\ccs\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\lib" -Wl,--rom_model -o "mpu6050_clean.out" main.o ti_msp_dl_config.o startup_mspm0g350x_ticlang.o pid_ctrl.o oled.o mpu_port.o i2c_utils.o delay.o inv_mpu.o inv_mpu_dmp_motion_driver.o -Wl,-l"device_linker.cmd" -Wl,-ldevice.cmd.genlibs -Wl,-llibc.a 2>nul
+
+rem 烧录
+echo FLASH
+"%DSLITE%" flash -c "%CCXML%" -s "AutoResetOnConnect=true" -s "VerifyAfterProgramLoad=2" "mpu6050_clean.out" 2>&1 | findstr /C:"Success" /C:"Failed" /C:"error"
+echo DONE
+```
+
+**Linux/Git Bash (fast_flash.sh)：**
+```bash
+#!/bin/bash
+# ⚠️ 用户配置区: 按实际安装路径修改
+PROJ="C:/Users/Administrator/workspace_ccstheia/mpu6050_clean"
+CC="C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/bin/tiarmclang.exe"
+DSLITE="C:/ti/uniflash_9.5.0/deskdb/content/TICloudAgent/win/ccs_base/DebugServer/bin/DSLite.exe"
+CCXML="$PROJ/targetConfigs/MSPM0G3507.ccxml"
+SDK="C:/ti/mspm0_sdk_2_10_00_04/source"
+set -e
+cd "$PROJ/Debug"
+
+# ⚠️ 按你的工程修改源文件列表
+for src in ../main.c ../pid_ctrl.c ../oled.c ../mpu_port.c ../i2c_utils.c ../delay.c ../inv_mpu.c ../inv_mpu_dmp_motion_driver.c; do
+    obj="./$(basename "${src%.c}.o")"
+    if [ "$src" -nt "$obj" ]; then
+        echo "CC $(basename $src)"
+        "$CC" -c -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -I"$PROJ" -I"$PROJ/Debug" -I"$SDK/third_party/CMSIS/Core/Include" -I"$SDK" -gdwarf-3 -Wall -o"$obj" "$src" 2>&1 | grep -E "error|Error" || true
+    fi
+done
+
+echo "LINK"
+"$CC" -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -Wl,-i"$SDK" -Wl,-i"$PROJ" -Wl,-i"$PROJ/Debug/syscfg" -Wl,-i"C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/lib" -Wl,--rom_model -o "mpu6050_clean.out" ./main.o ./ti_msp_dl_config.o ./startup_mspm0g350x_ticlang.o ./pid_ctrl.o ./oled.o ./mpu_port.o ./i2c_utils.o ./delay.o ./inv_mpu.o ./inv_mpu_dmp_motion_driver.o -Wl,-l"./device_linker.cmd" -Wl,-ldevice.cmd.genlibs -Wl,-llibc.a 2>&1 | grep -E "error|Error" || true
+
+echo "FLASH"
+"$DSLITE" flash -c "$CCXML" -s "AutoResetOnConnect=true" -s "VerifyAfterProgramLoad=2" "./mpu6050_clean.out" 2>&1 | grep -E "Success|Failed|error"
+```
+
+**耗时分析：**
+| 阶段 | 耗时 | 说明 |
+|------|------|------|
+| 调试服务器初始化 | ~4 秒 | TI 工具链固有开销，不可避免 |
+| 增量编译 | <1 秒 | 只编译改动文件 |
+| 链接 | <0.5 秒 | |
+| 实际烧录 | <100ms | 100KB 量级固件 |
+
+### 方式四：J-Link 烧录
 
 ```
 1. 用杜邦线连接:  J-Link        天猛星
@@ -694,116 +840,9 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
 6. 点击 "Load Image" 烧录
 ```
 
-### XDS110 烧录步骤
+### 方式五：串口 BSL 烧录 (无需调试器)
 
-```
-1. 杜邦线连接:    XDS110       天猛星
-                  TMS/SWDIO  → PA19
-                  TCK/SWCLK  → PA20
-                  3V3        → 3.3V
-                  GND        → GND
-2. UniFlash → Connection: Texas Instruments XDS110 USB Debug Probe
-3. Load Image → 烧录
-4. 无需按 BSL/RST 键
-```
-
-### XDS110 快速编译+烧录脚本 (✅ 实测验证)
-
-XDS110 烧录固定 ~4 秒开销（TI 调试服务器初始化），实际烧录 <100ms。使用脚本可减少手动操作。
-
-**DSLite 命令行烧录 (核心命令)：**
-```bash
-DSLite flash -c mspm0g3507.ccxml \
-    -s "AutoResetOnConnect=true" \
-    -s "VerifyAfterProgramLoad=2" \
-    test_1.out
-```
-
-**关键设置说明：**
-| 设置 | 作用 |
-|------|------|
-| `AutoResetOnConnect=true` | 连接前自动复位芯片，避免超时 |
-| `VerifyAfterProgramLoad=2` | 跳过烧录后验证，节省时间 |
-
-**快速编译+烧录脚本 (fast_flash.sh)：**
-```bash
-#!/bin/bash
-# 用法: ./fast_flash.sh
-set -e
-PROJ="工程目录路径"
-CC="C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/bin/tiarmclang.exe"
-DSLSITE="C:/ti/uniflash_9.5.0/deskdb/content/TICloudAgent/win/ccs_base/DebugServer/bin/DSLite.exe"
-CCXML="C:/ti/uniflash_9.5.0/deskdb/content/TICloudAgent/win/scripting/examples/debugger/mspm0g3507/mspm0g3507.ccxml"
-SDK="C:/ti/mspm0_sdk_2_10_00_04/source"
-
-cd "$PROJ/Debug"
-
-# 只编译改动的 .c 文件
-for src in ../empty.c ../encoder.c ../motor.c ../pid.c; do
-    obj="./$(basename "${src%.c}.o")"
-    if [ "$src" -nt "$obj" ]; then
-        echo "CC $(basename $src)"
-        "$CC" -c -D__MSPM0G3507__ -D__USE_SYSCONFIG__ \
-            -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 \
-            -I"$PROJ" -I"$PROJ/Debug" -I"$SDK/third_party/CMSIS/Core/Include" -I"$SDK" \
-            -gdwarf-3 -Wall -o"$obj" "$src" 2>&1 | grep -E "error|Error" || true
-    fi
-done
-
-# 链接
-echo "LINK"
-"$CC" -D__MSPM0G3507__ -D__USE_SYSCONFIG__ \
-    -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 \
-    -Wl,-i"$SDK" -Wl,-i"$PROJ" -Wl,-i"$PROJ/Debug/syscfg" \
-    -Wl,-i"C:/ti/ccs2020/ccs/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/lib" \
-    -Wl,--rom_model -o "test_1.out" \
-    ./empty.o ./ti_msp_dl_config.o ./startup_mspm0g350x_ticlang.o ./encoder.o ./motor.o ./pid.o \
-    -Wl,-l"./device_linker.cmd" -Wl,-ldevice.cmd.genlibs -Wl,-llibc.a 2>&1 | grep -E "error|Error" || true
-
-# 烧录
-echo "FLASH"
-"$DSLSITE" flash -c "$CCXML" -s "AutoResetOnConnect=true" -s "VerifyAfterProgramLoad=2" "./test_1.out" 2>&1 | grep -E "Success|Failed|error"
-```
-
-**Windows 批处理版 (fast_flash.bat)：**
-```bat
-@echo off
-rem ===== 用户配置区 (按实际安装路径修改) =====
-set PROJ=<你的CCS工程目录路径>
-set CC=<CCS安装目录>\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\bin\tiarmclang.exe
-set DSLITE=<UniFlash安装目录>\deskdb\content\TICloudAgent\win\ccs_base\DebugServer\bin\DSLite.exe
-set CCXML=<UniFlash安装目录>\deskdb\content\TICloudAgent\win\scripting\examples\debugger\mspm0g3507\mspm0g3507.ccxml
-set SDK=<MSPM0 SDK安装目录>\source
-
-cd /d "%PROJ%\Debug"
-
-rem 编译改动文件
-for %%s in (empty encoder motor pid) do (
-    if "..\%%s.c" is newer than "%%s.o" (
-        echo CC %%s.c
-        "%CC%" -c -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -I"%PROJ%" -I"%PROJ%\Debug" -I"%SDK%\third_party\CMSIS\Core\Include" -I"%SDK%" -gdwarf-3 -Wall -o"%%s.o" "..\%%s.c" 2>nul
-    )
-)
-
-rem 链接
-echo LINK
-"%CC%" -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -march=thumbv6m -mcpu=cortex-m0plus -mfloat-abi=soft -mlittle-endian -mthumb -O2 -Wl,-i"%SDK%" -Wl,-i"%PROJ%" -Wl,-i"%PROJ%\Debug\syscfg" -Wl,-i"C:\ti\ccs2020\ccs\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\lib" -Wl,--rom_model -o "test_1.out" empty.o ti_msp_dl_config.o startup_mspm0g350x_ticlang.o encoder.o motor.o pid.o -Wl,-l"device_linker.cmd" -Wl,-ldevice.cmd.genlibs -Wl,-llibc.a 2>nul
-
-rem 烧录
-echo FLASH
-"%DSLITE%" flash -c "%CCXML%" -s "AutoResetOnConnect=true" -s "VerifyAfterProgramLoad=2" "test_1.out" 2>&1 | findstr /C:"Success" /C:"Failed" /C:"error"
-echo DONE
-```
-
-**耗时分析：**
-| 阶段 | 耗时 | 说明 |
-|------|------|------|
-| 调试服务器初始化 | ~4 秒 | TI 工具链固有开销，不可避免 |
-| 增量编译 | <1 秒 | 只编译改动文件 |
-| 链接 | <0.5 秒 | |
-| 实际烧录 1.9KB | <100ms | |
-
-### 串口(BSL)烧录 (✅ 实测验证)
+**✅ 实测验证 (2025-05-18)**：UniFlash 9.5.0 + COM5 + MSPM0G3507 烧录成功。
 
 ```
 1. CCS 编译 → Ctrl+B
@@ -816,19 +855,21 @@ echo DONE
 8. 拔插 Type-C 冷启动 → OK
 ```
 
-> **实测**: BSL 烧录 920B @ 0.9kB/s, 程序正常执行。XDS110 到货前可靠替代。
+> **⚠️ BSL 引脚注意**：BSL 使用 PA0(TX)/PA1(RX)，这两个引脚是开漏输出，**必须加外部 4.7kΩ~10kΩ 上拉电阻到 3.3V**。
 
-### CCS Post-build 自动生成 .txt
-
-CCS → Project → Properties → Build → Steps → Post-build steps：
-
+**CCS Post-build 自动生成 .txt** (Project → Properties → Build → Steps)：
 ```
 ${CCS_INSTALL_ROOT}/tools/compiler/ti-cgt-armllvm_4.0.3.LTS/bin/tiarmhex --ti_txt ${ProjName}.out
 ```
 
-### 软件触发 BSL (基于 bsl_software_invoke_app_demo_uart 例程验证)
+**✅ BSL 实测注意**：
+- 两个误报错误可忽略：`Image Loading Failed` 和 `Verification Failed for Datablock` — 固件实际已烧入
+- 小固件(<1KB) 触发 `Data Block Size less than 1KB` 假警告，不影响运行
+- **推荐 BSL 作为 XDS110 到货前的可靠替代方案**
 
-无需按硬件 BSL 键，代码中触发进入 BSL 模式：
+### 软件触发 BSL (无需按硬件键)
+
+基于 bsl_software_invoke_app_demo_uart 例程验证，代码中触发进入 BSL 模式：
 
 ```c
 /* 方法1: 按键触发 — GPIO中断中置标志, 主循环检测后调用 */
@@ -883,14 +924,6 @@ __STATIC_INLINE void invokeBSL(void) {
 if (BSL_trigger_flag) {
     invokeBSL();  // 跳转BSL, 不复返回
 }
-```
-
-### CCS 生成 .txt 文件 (串口烧录用)
-
-CCS 默认只生成 `.out`，需在 **Project → Properties → Build → Steps → Post-build steps** 添加：
-
-```
-${CCS_INSTALL_ROOT}/tools/compiler/ti-cgt-armllvm_4.0.2.LTS/bin/tiarmhex --ti_txt ${ProjName}.out
 ```
 
 ---

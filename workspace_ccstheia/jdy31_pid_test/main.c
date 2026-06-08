@@ -1,7 +1,7 @@
 /**
  * main.c — JDY-31 蓝牙 PID 调参 最小测试单元
  *
- * 硬件: MSPM0G3507 + JDY-31 (UART1 PB6/PB7) + OLED (I2C0 PA28/PA31)
+ * 硬件: MSPM0G3507 + JDY-31 (UART1 TX=PB6/RX=PB7) + OLED (I2C0 PA28/PA31)
  *
  * 功能:
  *   1. UART1 9600 收发 — 上位机(PC蓝牙/手机)发PID命令
@@ -36,10 +36,12 @@
 #include "ti_msp_dl_config.h"
 #include "oled.h"
 #include "delay.h"
+#include "imu601.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* ========================= 外设引用 ========================= */
 #define BT_UART            UART_JDY31_INST
@@ -52,10 +54,25 @@ float    g_kd       = 0.0f;    /* Kd ×0.01 */
 int16_t  g_target   = 42;      /* 目标速度 (编码器脉冲/周期) */
 int16_t  g_base_pwm = 800;     /* 前馈 PWM 占空比 */
 
+/* ========================= IMU601 状态 ========================= */
+static imu601_attitude_t g_imu_att;       /* 最新姿态角 */
+static bool              g_imu_valid;     /* 数据有效 */
+static uint32_t          g_imu_frames;    /* 帧计数快照 */
+static uint32_t          g_imu_errors;    /* 错误计数快照 */
+
 /* ========================= 接收缓冲区 ========================= */
 #define RX_BUF_SIZE   64
+#define RX_IDLE_TICKS 5U
+#define PB7_GPIO_PULLUP_DIAG 1
 static char   rx_buf[RX_BUF_SIZE];
 static uint8_t rx_idx = 0;
+static uint8_t rx_idle_ticks = 0;
+static uint32_t rx_byte_count = 0;
+static uint32_t rx_error_count = 0;
+static uint32_t rx_overrun_count = 0;
+static uint32_t rx_break_count = 0;
+static uint32_t rx_parity_count = 0;
+static uint32_t rx_framing_count = 0;
 
 /* 上次收到的完整命令行 (用于 OLED 显示) */
 static char   last_cmd[32];
@@ -85,12 +102,14 @@ static void bt_tx_str(const char *s)
     while (*s) bt_tx_byte(*s++);
 }
 
-/* 发送整数 + 换行 */
-static void bt_tx_intln(const char *label, int16_t val)
+static void bt_tx_hex_byte(uint8_t value)
 {
-    char buf[24];
-    int len = sprintf(buf, "%s%d\r\n", label, val);
-    for (int i = 0; i < len; i++) bt_tx_byte(buf[i]);
+    static const char hex[] = "0123456789ABCDEF";
+
+    bt_tx_byte('<');
+    bt_tx_byte(hex[(value >> 4) & 0x0FU]);
+    bt_tx_byte(hex[value & 0x0FU]);
+    bt_tx_byte('>');
 }
 
 /* 发送确认帧 (回显当前所有参数) */
@@ -111,8 +130,8 @@ static void bt_tx_ack(void)
 /* 解析蓝牙命令 (与串口调参协议完全一致) */
 static void bt_parse_cmd(const char *cmd, int len)
 {
-    static int  value = 0;
-    static int  mode  = 0;  /* 0=none 1=P 2=I 3=D 4=T 5=B */
+    int value = 0;
+    int mode  = 0;  /* 0=none 1=P 2=I 3=D 4=T 5=B */
 
     for (int i = 0; i < len; i++) {
         char c = cmd[i];
@@ -155,6 +174,90 @@ static void bt_parse_cmd(const char *cmd, int len)
     }
 }
 
+static void bt_finish_rx_cmd(bool add_newline)
+{
+    int copy_len = (rx_idx < 31U) ? rx_idx : 30U;
+
+    if (rx_idx == 0U) {
+        return;
+    }
+
+    memcpy(last_cmd, rx_buf, copy_len);
+    last_cmd[copy_len] = '\0';
+    cmd_updated = true;
+
+    if (add_newline && (rx_idx < RX_BUF_SIZE - 1U)) {
+        rx_buf[rx_idx++] = '\n';
+        rx_buf[rx_idx] = '\0';
+    }
+
+    bt_parse_cmd(rx_buf, rx_idx);
+    rx_idx = 0U;
+    rx_idle_ticks = 0U;
+}
+
+static bool bt_poll_rx(void)
+{
+#if PB7_GPIO_PULLUP_DIAG
+    return false;
+#else
+    bool rx_activity = false;
+
+    while (!DL_UART_Main_isRXFIFOEmpty(BT_UART)) {
+        uint32_t rxdata = BT_UART->RXDATA;
+        uint32_t err = rxdata & (DL_UART_ERROR_OVERRUN |
+                                 DL_UART_ERROR_BREAK |
+                                 DL_UART_ERROR_PARITY |
+                                 DL_UART_ERROR_FRAMING);
+
+        rx_activity = true;
+        rx_idle_ticks = 0U;
+
+        if (err != 0U) {
+            rx_error_count++;
+            if ((err & DL_UART_ERROR_OVERRUN) != 0U) {
+                rx_overrun_count++;
+            }
+            if ((err & DL_UART_ERROR_BREAK) != 0U) {
+                rx_break_count++;
+            }
+            if ((err & DL_UART_ERROR_PARITY) != 0U) {
+                rx_parity_count++;
+            }
+            if ((err & DL_UART_ERROR_FRAMING) != 0U) {
+                rx_framing_count++;
+            }
+            rx_idx = 0U;
+            continue;
+        }
+
+        char c = (char)(rxdata & UART_RXDATA_DATA_MASK);
+        rx_byte_count++;
+        bt_tx_hex_byte((uint8_t)c);
+
+        if (rx_idx < RX_BUF_SIZE - 1U) {
+            rx_buf[rx_idx++] = c;
+            rx_buf[rx_idx] = '\0';
+
+            if (c == '\n' || c == '\r') {
+                bt_finish_rx_cmd(false);
+            }
+        } else {
+            rx_idx = 0U;
+        }
+    }
+
+    if (!rx_activity && (rx_idx > 0U)) {
+        if (++rx_idle_ticks >= RX_IDLE_TICKS) {
+            bt_finish_rx_cmd(true);
+            rx_activity = true;
+        }
+    }
+
+    return rx_activity;
+#endif
+}
+
 /* ========================= OLED 显示 ========================= */
 
 /* 刷新 OLED (调用开销小, 放在主循环) */
@@ -162,33 +265,61 @@ static void oled_update(void)
 {
     char text[22];
 
-    /* 第0行: 标题 */
+    /* 第0行: 标题 + 帧计数 */
     OLED_ClearPage(0);
-    OLED_Puts(0, 0, "JDY31 BT PID TEST");
+    sprintf(text, "IMU601 F%lu", (unsigned long)g_imu_frames);
+    OLED_Puts(0, 0, text);
 
-    /* 第1行: 蓝牙状态 + LED */
+    /* 第1行: Roll (横滚角) */
     OLED_ClearPage(1);
-    OLED_Puts(1, 0, led_on ? "RX:ON " : "RX:   ");
-
-    /* 第2-3行: 最近收到的命令 */
-    OLED_ClearPage(2);
-    OLED_Puts(2, 0, "CMD:");
-    if (cmd_updated) {
-        OLED_Puts(2, 30, last_cmd);
+    if (g_imu_valid) {
+        sprintf(text, "R:%+6.1f", (double)g_imu_att.roll);
+    } else {
+        sprintf(text, "R:--.-");
     }
+    OLED_Puts(1, 0, text);
 
-    /* 第4-6行: 当前 PID 参数 */
+    /* 第2行: Pitch (俯仰角) */
+    OLED_ClearPage(2);
+    if (g_imu_valid) {
+        sprintf(text, "P:%+6.1f", (double)g_imu_att.pitch);
+    } else {
+        sprintf(text, "P:--.-");
+    }
+    OLED_Puts(2, 0, text);
+
+    /* 第3行: Yaw (偏航角) */
+    OLED_ClearPage(3);
+    if (g_imu_valid) {
+        sprintf(text, "Y:%+6.1f", (double)g_imu_att.yaw);
+    } else {
+        sprintf(text, "Y:--.-");
+    }
+    OLED_Puts(3, 0, text);
+
+    /* 第4行: 错误计数 + 帧ID (调试) */
     OLED_ClearPage(4);
-    sprintf(text, "P=%.1f I=%.2f", (double)g_kp, (double)g_ki);
+    sprintf(text, "ERR:%lu ID:%02X",
+        (unsigned long)g_imu_errors,
+        imu601_get_last_frame_id());
     OLED_Puts(4, 0, text);
 
+    /* 第5行: 蓝牙状态 */
     OLED_ClearPage(5);
-    sprintf(text, "D=%.2f T=%d", (double)g_kd, g_target);
+    sprintf(text, "BT:%s %s",
+        led_on ? "ON" : "--",
+        g_imu_valid ? "IMU_OK" : "IMU_WAIT");
     OLED_Puts(5, 0, text);
 
+    /* 第6行: 最近收到的 CMD + PID 简略 */
     OLED_ClearPage(6);
-    sprintf(text, "BASE=%d", g_base_pwm);
-    OLED_Puts(6, 0, text);
+    if (cmd_updated) {
+        OLED_Puts(6, 0, last_cmd);
+    } else {
+        sprintf(text, "P=%.1f I=%.2f D=%.2f",
+            (double)g_kp, (double)g_ki, (double)g_kd);
+        OLED_Puts(6, 0, text);
+    }
 
     /* 第7行: 操作提示 */
     OLED_ClearPage(7);
@@ -202,6 +333,21 @@ int main(void)
     /* SysConfig 初始化: 时钟 GPIO I2C UART */
     SYSCFG_DL_init();
 
+    /* IMU601 初始化: UART0 (PA0/PA1) @ 115200 */
+    imu601_init();
+
+#if PB7_GPIO_PULLUP_DIAG
+    DL_GPIO_initDigitalInputFeatures(GPIO_UART_JDY31_IOMUX_RX,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+#else
+    /* UART RX idle should be high; pull-up helps diagnose a floating PB7 line. */
+    DL_GPIO_initPeripheralInputFunctionFeatures(GPIO_UART_JDY31_IOMUX_RX,
+        GPIO_UART_JDY31_IOMUX_RX_FUNC, DL_GPIO_INVERSION_DISABLE,
+        DL_GPIO_RESISTOR_PULL_UP, DL_GPIO_HYSTERESIS_DISABLE,
+        DL_GPIO_WAKEUP_DISABLE);
+#endif
+
     /* 按键上拉 */
     DL_GPIO_initDigitalInputFeatures(CAL_KEY_IOMUX,
         DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
@@ -213,8 +359,10 @@ int main(void)
     /* OLED 初始化 */
     OLED_Init();
     OLED_Clear();
-    OLED_Puts(0, 0, "JDY31 BT INIT...");
+    OLED_Puts(0, 0, "JDY31 BT + IMU601");
     OLED_Puts(1, 0, "UART1 9600");
+    OLED_Puts(2, 0, "UART0 115200");
+    OLED_Puts(3, 0, "IMU INIT...");
 
     /* LED 初始状态: 亮起表示上电 */
     DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
@@ -236,28 +384,7 @@ int main(void)
 
     while (1) {
         /* ---- 蓝牙接收 (只收不回声, 完整行后发ACK) ---- */
-        bool rx_activity = false;
-        while (!DL_UART_Main_isRXFIFOEmpty(BT_UART)) {
-            rx_activity = true;
-            char c = (char)DL_UART_Main_receiveData(BT_UART);
-
-            if (rx_idx < RX_BUF_SIZE - 1) {
-                rx_buf[rx_idx++] = c;
-                rx_buf[rx_idx] = '\0';
-
-                if (c == '\n' || c == '\r') {
-                    int copy_len = (rx_idx < 31) ? rx_idx : 30;
-                    memcpy(last_cmd, rx_buf, copy_len);
-                    last_cmd[copy_len] = '\0';
-                    cmd_updated = true;
-
-                    bt_parse_cmd(rx_buf, rx_idx);
-                    rx_idx = 0;
-                }
-            } else {
-                rx_idx = 0;
-            }
-        }
+        bool rx_activity = bt_poll_rx();
 
         /* LED: RX时快闪, 空闲时心跳慢闪 */
         if (rx_activity) {
@@ -287,15 +414,38 @@ int main(void)
         static uint8_t oled_div = 0;
         if (++oled_div >= 100U) {
             oled_div = 0;
+
+            /* 读取 IMU601 最新姿态角 (非阻塞) */
+            g_imu_valid = imu601_get_attitude(&g_imu_att);
+            /* 更新统计快照 */
+            g_imu_frames = imu601_get_frame_count();
+            g_imu_errors = imu601_get_error_count();
+
             oled_update();
             cmd_updated = false;
+            rx_activity |= bt_poll_rx();
+            if (rx_activity) {
+                DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
+                led_on = true;
+            }
         }
 
         /* ---- 心跳: 每5秒发一次, LED灭 ---- */
         tick = (uint16_t)(tick + 1U);
         if (tick >= 500U) {  /* 500 × 10ms = 5s */
             tick = 0;
-            bt_tx_str(".\r\n");     /* 一个点表示活着 */
+            char diag[64];
+
+            sprintf(diag, ". R%lu E%lu O%lu F%lu P%lu B%lu L%u\r\n",
+                (unsigned long)rx_byte_count,
+                (unsigned long)rx_error_count,
+                (unsigned long)rx_overrun_count,
+                (unsigned long)rx_framing_count,
+                (unsigned long)rx_parity_count,
+                (unsigned long)rx_break_count,
+                (DL_GPIO_readPins(GPIO_UART_JDY31_RX_PORT,
+                    GPIO_UART_JDY31_RX_PIN) != 0U) ? 1U : 0U);
+            bt_tx_str(diag);     /* 一个点表示活着 */
             led_on = false;
         }
         if (!led_on) {

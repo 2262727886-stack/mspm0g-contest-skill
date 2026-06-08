@@ -38,7 +38,6 @@ ntuser.*
 .vscode/
 .vscode-shared/
 .copilot/
-workspace_ccstheia/
 
 # 缓存 / 编译
 __pycache__/
