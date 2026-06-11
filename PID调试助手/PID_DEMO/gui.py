@@ -335,10 +335,13 @@ class App:
             if using_hw: bridge.set_pid(test_kp,0,0)
             else: bridge.sim.set_pid(test_kp,0,0)
             buf=SpeedBuffer(60)
-            for _ in range(60):
+            for sample_idx in range(60):
                 if self._stop_event.is_set():self._auto_log_msg("[已停止]");self.q.put(("done",None));return
                 s=bridge.read_sample()
-                if s: buf.add(s); self.q.put(("curve",s.get("speed_L",0)))
+                if s:
+                    buf.add(s)
+                    if sample_idx % 4 == 0:
+                        self.q.put(("curve",s.get("speed_L",0)))
             m=buf.calculate_metrics()
             cur_v=tgt-m['avg_error']
             self.q.put(("curve",cur_v))
@@ -357,9 +360,15 @@ class App:
         else:
             bridge.set_pid(best_p["p"],best_p["i"])
         try:
+            last_curve_push=[0.0]
+            def push_curve_throttled(sample):
+                now_t=time.monotonic()
+                if now_t-last_curve_push[0]>=0.05:
+                    last_curve_push[0]=now_t
+                    self.q.put(("curve",sample.get("speed_L",0)))
             final=run_tuning_engine(
                 bridge=bridge,config=self.config,current_pid=best_p,
-                on_sample=lambda s:self.q.put(("curve",s.get("speed_L",0))),
+                on_sample=push_curve_throttled,
                 on_round_complete=lambda r,pid,m,res:(
                     self.q.put(("pid",pid)),
                     self.q.put(("curve",tgt-m['avg_error'])),
@@ -584,7 +593,13 @@ class App:
 
     # ═══ 消息轮询 ═══
     def _poll(self):
-        for _ in range(30):
+        auto_logs=[]
+        manual_logs=[]
+        last_curve=None
+        curve_target=None
+        last_m_curve=None
+        max_msgs=300
+        for _ in range(max_msgs):
             try:msg=self.q.get_nowait()
             except queue.Empty:break
             tp,data=msg
@@ -592,26 +607,40 @@ class App:
                 for k in ("p","i","d"):
                     if k in data and k in self._av:self._av[k].set(f"{data[k]:.3f}")
             elif tp in ("curve","m_curve"):
-                self._curve.max_y=max(self._curve.target*2,120)
-                # 限频: 最多保留最近200点, 每2个点刷一次画布
-                self._curve.data.append(data)
-                if len(self._curve.data)>self._curve.max_pts:self._curve.data.pop(0)
-                if len(self._curve.data)%2==0:
-                    self._curve.draw()
-            elif tp=="target":self._curve.target=data
+                if tp=="curve":last_curve=data
+                else:last_m_curve=data
+            elif tp=="target":curve_target=data
             elif tp=="auto_log":
-                self._auto_log.insert(tk.END,str(data)+"\n")
-                self.root.after_idle(lambda:self._auto_log.see(tk.END))
+                auto_logs.append(str(data))
             elif tp=="m_log":
-                self._m_log.insert(tk.END,str(data)+"\n")
-                self.root.after_idle(lambda:self._m_log.see(tk.END))
+                manual_logs.append(str(data))
             elif tp=="score":self._score_var.set(str(data))
             elif tp=="rec":self._rec_var.set(str(data))
             elif tp=="done":
                 self.running=False;self._stop_event.clear()
                 if hasattr(self,'_auto_btn'):
                     self._auto_btn.config(text="开始自动调参",state=tk.NORMAL,bg=C["accent"],fg="white")
+        if curve_target is not None:
+            self._curve.target=curve_target
+        if last_curve is not None or last_m_curve is not None:
+            v=last_curve if last_curve is not None else last_m_curve
+            self._curve.max_y=max(self._curve.target*2,120)
+            self._curve.data.append(v)
+            if len(self._curve.data)>self._curve.max_pts:
+                del self._curve.data[:-self._curve.max_pts]
+            self._curve.draw()
+        if auto_logs:
+            self._append_log_batch(self._auto_log,auto_logs)
+        if manual_logs:
+            self._append_log_batch(self._m_log,manual_logs)
         self.root.after(30,self._poll)
+
+    def _append_log_batch(self,widget,lines,max_lines=500):
+        widget.insert(tk.END,"\n".join(lines)+"\n")
+        line_count=int(widget.index("end-1c").split(".")[0])
+        if line_count>max_lines:
+            widget.delete("1.0",f"{line_count-max_lines}.0")
+        widget.see(tk.END)
 
 def main():
     root=tk.Tk()
