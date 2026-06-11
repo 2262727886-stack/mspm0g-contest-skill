@@ -110,6 +110,7 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 | UART、printf、双芯通信 | `uart.md` | printf重定向 + UART协议解析 + K230帧协议 |
 | I2C、OLED、MPU6050 | `i2c.md` | OLED SSD1306 + MPU6050 驱动 + I2C总线共享 |
 | PID、滤波器、电机控制 | `pid.md` | PID速度/位置/级联 + 低通/卡尔曼 + TB6612电机 |
+| PID 自动调试工具 | `pid_tuner_protocol.md` | PC 调参工具 ↔ MSPM0G3507 的 UART 通信模板 (CSV+SET命令) |
 | K230 视觉、双芯方案 | `k230.md` | CanMV API速查 + 已知问题 + 双芯通信 + 帧率审查 |
 | 电赛真题方案 | `contest.md` | 25E瞄准装置 + 24H自动小车 + 23E运动追踪 + 赛前准备 |
 | SysConfig、烧录、VOFA+ | `tools.md` | CCS工程 + SysConfig + 烧录 + VOFA+ + Flash + WDT |
@@ -173,6 +174,8 @@ Pin/API traps:
 | **M0G** | BSL烧录 / UART0 printf / SysConfig全引脚 / 12个driverlib例程 | ✅ 验证 |
 | **M0G** | 按键K1/K2 / 蜂鸣器 / ADC循迹 | 🟡 待测 |
 | **双芯** | K230→M0G UART FF FE (9600) / 色块追踪→舵机随动 | ✅ 实机 |
+| **PID Tuner** | PC 自动调参工具 ↔ MCU UART 通信 (CSV+SET/STATUS/RESET) | ✅ 实机 |
+| **PID Tuner 固件** | pid_tuner_test 最小验证工程 (PA10/PA11 UART0) | ✅ 实机 |
 
 ---
 
@@ -240,3 +243,51 @@ Verified control pattern for one-shot clockwise 90-degree turn:
 
 Reusable example:
 - See `examples/imu601_yaw_pid_90deg_turn.md`.
+
+---
+
+## 2026-05 IMU601 Car 8-Way Line Tracking Lessons
+
+Use this section first when the Tianmengxing MSPM0G3507 car uses the existing IMU601/OLED/TB6612 project and asks for 8-way digital line tracking.
+
+Verified 8-way line sensor GPIO order, left to right:
+
+| Sensor order | Board pin | IOMUX | GPIO read port |
+|---|---|---|---|
+| L1 | PB25 | `IOMUX_PINCM56` | `GPIOB, DL_GPIO_PIN_25` |
+| L2 | PB24 | `IOMUX_PINCM52` | `GPIOB, DL_GPIO_PIN_24` |
+| L3 | PB20 | `IOMUX_PINCM48` | `GPIOB, DL_GPIO_PIN_20` |
+| L4 | PA14 | `IOMUX_PINCM36` | `GPIOA, DL_GPIO_PIN_14` |
+| R4 | PB18 | `IOMUX_PINCM44` | `GPIOB, DL_GPIO_PIN_18` |
+| R3 | PB19 | `IOMUX_PINCM45` | `GPIOB, DL_GPIO_PIN_19` |
+| R2 | PB10 | `IOMUX_PINCM27` | `GPIOB, DL_GPIO_PIN_10` |
+| R1 | PA7 | `IOMUX_PINCM14` | `GPIOA, DL_GPIO_PIN_7` |
+
+Line sensor electrical behavior:
+- Configure all 8 pins with `DL_GPIO_initDigitalInputFeatures(..., DL_GPIO_RESISTOR_PULL_UP, DL_GPIO_HYSTERESIS_ENABLE, ...)`.
+- The module is active-low: raw GPIO `0` means black line, raw GPIO `1` means white/no line.
+- Internally it is convenient to store `s_line_bits` as active-high detection bits: set bit to `1` when raw GPIO is `0`.
+- On OLED, display raw sensor meaning if the user is calibrating: show `0` for black line and `1` for white/no line, ordered left to right.
+
+Line tracking control pattern:
+- Use weighted position error over 8 sensors, for example weights `{-35,-25,-15,-5,5,15,25,35}`.
+- Negative error means the line is left; positive error means the line is right.
+- For differential steering, compute `corr = clamp(error * LINE_KP, -LINE_CORR_LIMIT, LINE_CORR_LIMIT)`.
+- To make the whole car rotate during sharp turns instead of pivoting around the stopped inner wheel, allow the inner wheel target PWM to go negative:
+  - `target_l = LINE_BASE_DUTY + corr`
+  - `target_r = LINE_BASE_DUTY - corr`
+  - clamp both targets to `[-(MOTOR_PWM_MAX - MOTOR_PWM_DEAD), +(MOTOR_PWM_MAX - MOTOR_PWM_DEAD)]`, not to `[0, max]`.
+- Verified starting parameters: `LINE_BASE_DUTY=260`, `LINE_RAMP=10`, `LINE_CTRL_MS=20`, `LINE_KP=12`, `LINE_CORR_LIMIT=500`, `LINE_SEARCH_DUTY=180`. Tune on lifted wheels first.
+
+Startup offset problems found:
+- If the car nudges right immediately after PA25 start, check both line-tracking startup state and encoder residue.
+- Do not default lost-line search to right when no valid line sample has been seen. Keep a `s_line_has_last` flag; before the first valid black-line sample, go slowly forward or wait instead of rotating.
+- On entering run/line mode, preload line error from the current 8-way sensor state if available. If no line is detected, set `s_line_has_last=false` and `s_line_dir='S'`.
+- Clear stale encoder counts before starting motion. Add an `encoder_clear_counts()` helper that disables IRQ, sets `g_enc_l=g_enc_r=0`, then re-enables IRQ. Call `Motor_Stop(); encoder_clear_counts();` before switching from `MODE_IDLE` into the run mode.
+- Reset run-state variables on start/stop: `s_balance`, `s_balance_i`, `s_duty_l`, `s_duty_r`, `s_line_error`, `s_line_last_error`, `s_line_has_last`, and `s_line_dir`.
+
+Common debug display:
+- OLED page 0: mode (`IDLE`, `LINE`, `TURN 90`).
+- OLED page 1: raw 8-way line display, e.g. `L:11100111 18`, where `0` positions are on black line.
+- OLED page 2: line error and direction, e.g. `E:15 DIR:R`.
+- Software UART debug can include `L:%02X`, where the hex value is the internal active-high black-line bitmask.
