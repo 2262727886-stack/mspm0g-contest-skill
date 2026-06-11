@@ -13,7 +13,7 @@ def main():
         elif a == "--config" and args: config_path = args.pop(0)
         elif a in ("-h","--help"): print_help(); return
 
-    from mspm0g_tuner.config import load_config
+    from PID_DEMO.config import load_config
     config = load_config(config_path)
     if mode == "menu": mode = show_menu()
     if mode == "hardware": run_hardware(config)
@@ -42,7 +42,7 @@ def show_menu() -> str:
 
 def run_hardware(config):
     print("\n--- Hardware Mode ---\n")
-    from mspm0g_tuner.bridge import SerialBridge
+    from PID_DEMO.bridge import SerialBridge
     bridge = SerialBridge(port=config.get("SERIAL_PORT","AUTO"), baud=config.get("BAUD_RATE",115200))
     if not bridge.connect(): return
     status = bridge.get_status()
@@ -53,7 +53,7 @@ def run_hardware(config):
     except: t = 60
     input("\n  Ensure car is lifted/wheels free. Press Enter to start...")
     current = {"p": 3.0, "i": 1.0, "d": 0.0}
-    from mspm0g_tuner.engine import run_tuning_engine
+    from PID_DEMO.engine import run_tuning_engine
     try:
         final = run_tuning_engine(bridge=bridge, config=config, current_pid=current)
         print(f"\nOptimal PID: P={final['p']:.3f} I={final['i']:.3f}")
@@ -64,11 +64,11 @@ def run_hardware(config):
 
 def run_simulation(config):
     print("\n--- Simulation Mode ---\n")
-    from mspm0g_tuner.car_model import CarSimulator
-    from mspm0g_tuner.buffer import SpeedBuffer
-    from mspm0g_tuner.history import TuningHistory
-    from mspm0g_tuner.pid_safety import apply_pid_guardrails, build_fallback_suggestion, is_good_enough
-    from mspm0g_tuner.llm.client import LLMTuner
+    from PID_DEMO.car_model import CarSimulator
+    from PID_DEMO.buffer import SpeedBuffer
+    from PID_DEMO.history import TuningHistory
+    from PID_DEMO.pid_safety import apply_pid_guardrails, build_fallback_suggestion, is_good_enough
+    from PID_DEMO.llm.client import LLMTuner
     sim = CarSimulator(); tuner = LLMTuner(config); history = TuningHistory()
     current = {"p": 1.0, "i": 0.0, "d": 0.0}; sim.set_pid(**current)
     max_r = config.get("MAX_TUNING_ROUNDS", 15)

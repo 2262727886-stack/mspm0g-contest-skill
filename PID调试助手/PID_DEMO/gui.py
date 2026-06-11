@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
-from mspm0g_tuner.config import load_config, DEFAULT_CONFIG
+from PID_DEMO.config import load_config, DEFAULT_CONFIG
 
 # ═══ 设计系统 ═══
 C = {"bg":"#f3f4f6","card":"#fff","hover":"#e5e7eb","border":"#d1d5db",
@@ -136,7 +136,7 @@ class App:
 
     def _conn_toggle(self):
         if not self._conn:
-            from mspm0g_tuner.bridge import SerialBridge
+            from PID_DEMO.bridge import SerialBridge
             try:baud=int(self._tb_baud.get())
             except:baud=115200
             port=self._tb_port.get().strip() or "AUTO"
@@ -297,15 +297,15 @@ class App:
             self.q.put(("done",None))
 
     def _auto_worker_inner(self,algo,mr,tgt):
-        from mspm0g_tuner.sim_adapter import SimAdapter
-        from mspm0g_tuner.engine import run_tuning_engine
-        from mspm0g_tuner.buffer import SpeedBuffer
+        from PID_DEMO.sim_adapter import SimAdapter
+        from PID_DEMO.engine import run_tuning_engine
+        from PID_DEMO.buffer import SpeedBuffer
         import time
 
         # 判断模式
         want_hw=(self._auto_mode.get()=="hw")
         if want_hw:
-            from mspm0g_tuner.bridge import SerialBridge
+            from PID_DEMO.bridge import SerialBridge
             port=self._tb_port.get().strip() or "AUTO"
             try: baud=int(self._tb_baud.get())
             except: baud=115200
@@ -433,8 +433,8 @@ class App:
         threading.Thread(target=self._m_run,args=(p,i,d,tests,sec,tgt),daemon=True).start()
 
     def _m_run(self,p,i,d,tests,sec,tgt):
-        from mspm0g_tuner.car_model import CarSimulator
-        from mspm0g_tuner.buffer import SpeedBuffer
+        from PID_DEMO.car_model import CarSimulator
+        from PID_DEMO.buffer import SpeedBuffer
         all_m=[]
         for ti in range(tests):
             if self._stop_event.is_set():self._m_log_msg("[已停止]");break
@@ -460,9 +460,9 @@ class App:
         except:p=3.0;i=1.0;d=0.0
         try:tgt=int(self._mtgt.get())
         except:tgt=60
-        from mspm0g_tuner.car_model import CarSimulator
-        from mspm0g_tuner.buffer import SpeedBuffer
-        from mspm0g_tuner.llm.client import LLMTuner
+        from PID_DEMO.car_model import CarSimulator
+        from PID_DEMO.buffer import SpeedBuffer
+        from PID_DEMO.llm.client import LLMTuner
         sim=CarSimulator();sim.target=tgt;sim.set_pid(p,i,d)
         buf=SpeedBuffer(200)
         for _ in range(250):
