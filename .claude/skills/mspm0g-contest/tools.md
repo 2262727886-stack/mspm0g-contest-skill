@@ -669,12 +669,71 @@ void oled_puts_cn(uint8_t x, uint8_t y, const char *str) {
 >
 > 本节所有代码和脚本中的引脚分配均为 **示例**，你必须根据自己的实际硬件接线修改 SysConfig (.syscfg) 中的引脚配置。
 > **烧录只是把固件写入芯片，引脚错了一样能烧进去，但外设不会工作甚至可能短路！**
+> **硬性指标：烧录前必须先执行本节“工程交付/烧录前强制验证流程”。SysConfig 生成失败或 C 文件编译失败时禁止烧录，必须先修到 0 报错。**
 >
 > 每次拿到新工程或复制模板后：
 > 1. 打开 `.syscfg` 文件，逐项检查每个外设的引脚是否与你的实际接线一致
 > 2. 特别注意：电机 PWM、编码器、I2C、UART 的引脚
 > 3. 禁用引脚 (PA2~PA6, PA19/PA20) 不要分配给任何外设
-> 4. 修改后重新编译 (Ctrl+B) 再烧录
+> 4. 修改后先跑下面的强制验证流程，再编译/烧录
+
+### 工程交付/烧录前强制验证流程
+
+当生成或修改任何 MSPM0G3507 工程时，必须按这个顺序验证，不能只靠肉眼检查：
+
+1. **SysConfig 生成检查**：用本机 MSPM0 SDK 的 `product.json` 生成 `Debug/syscfg/ti_msp_dl_config.c/h`。这一步能发现外设冲突、引脚不可用、模块配置错误。
+2. **宏名检查**：打开生成的 `Debug/syscfg/ti_msp_dl_config.h`，确认代码里使用的宏名真实存在，例如 `START_PORT`、`START_BTN_PIN`、`DEBUG_UART_INST`、`MOTOR_PWM_INST`。不得凭经验猜宏名。
+3. **对象编译检查**：用 `tiarmclang.exe` 编译所有新增/修改 `.c` 文件，以及 `Debug/syscfg/ti_msp_dl_config.c`。至少要通过对象编译；如果能完整 CCS Build 更好。
+4. **结果处理**：任一步失败都必须停止交付/烧录并修复。最终回复用户时必须写明“SysConfig 生成通过、对象编译通过”或明确说明未验证原因。
+
+PowerShell 模板（在仓库根目录执行，修改 `$proj` 为工程目录）：
+
+```powershell
+$proj = "workspace_ccstheia\pid_tuner_car"
+$sdk = "C:\ti\mspm0_sdk_2_10_00_04"
+$syscfg = "C:\ti\sysconfig_1.26.2\sysconfig_cli.bat"
+$cc = "C:\ti\ccs2020\ccs\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\bin\tiarmclang.exe"
+
+New-Item -ItemType Directory -Force -Path "$proj\Debug\syscfg" | Out-Null
+& $syscfg --product "$sdk\.metadata\product.json" --script "$proj\empty.syscfg" --output "$proj\Debug\syscfg"
+if ($LASTEXITCODE -ne 0) { throw "SysConfig generate failed" }
+
+Push-Location $proj
+New-Item -ItemType Directory -Force -Path build_check | Out-Null
+$incs = @(
+  "-I.",
+  "-IDebug\syscfg",
+  "-I$sdk\source",
+  "-I$sdk\source\third_party\CMSIS\Core\Include",
+  "-IC:\ti\ccs2020\ccs\tools\compiler\ti-cgt-armllvm_4.0.3.LTS\include\c"
+)
+$flags = @(
+  "-D__MSPM0G3507__",
+  "-D__USE_SYSCONFIG__",
+  "-mcpu=cortex-m0plus",
+  "-mthumb",
+  "-mfloat-abi=soft",
+  "-std=c99",
+  "-Wall"
+)
+$files = @(
+  "main.c",
+  "Debug\syscfg\ti_msp_dl_config.c"
+)
+# 按实际工程把 motor.c / encoder.c / oled.c / pid.c 等模块加入 $files。
+foreach ($f in $files) {
+  $obj = "build_check\" + [IO.Path]::GetFileNameWithoutExtension($f) + ".o"
+  & $cc @flags @incs -c $f -o $obj
+  if ($LASTEXITCODE -ne 0) {
+    Pop-Location
+    throw "Compile failed: $f"
+  }
+}
+Pop-Location
+"SysConfig generate OK; compile objects OK"
+```
+
+烧录前必须再次执行：若刚刚改过 `.syscfg`、`.c/.h`、工程路径、SDK/编译器路径，不能沿用旧验证结果。验证后可删除 `Debug/` 和 `build_check/` 临时产物；若工程需要提交，通常不提交 `Debug/` 生成物。
 
 ### 烧录方式总览
 

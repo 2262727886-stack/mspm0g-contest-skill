@@ -41,6 +41,8 @@ description: MSPM0G 电赛开发助手 — 天猛星 MSPM0G3507 + K230 双芯架
 
 ### 3. 代码质量
 - **VS Code 依赖配置必做**：每次创建、接手或整理 MSPM0G CCS/Theia 工程后，必须自行创建/更新工作区 `.vscode/c_cpp_properties.json`，这是"代码不报错"的必备依赖库配置。配置必须包含工程根目录、工程 `Debug` 目录、MSPM0 SDK `source`、CMSIS、TI ArmClang include；`defines` 至少包含 `__MSPM0G3507__` 和 `__USE_SYSCONFIG__`；`compilerPath` 必须指向当前机器实际存在的 `tiarmclang.exe`。不要等用户提醒。
+- **工程交付前强制验证（硬性指标）**：每次创建、修改、接手 MSPM0G CCS/Theia 工程后，必须先执行 `tools.md` 的“工程交付/烧录前强制验证流程”：SysConfig CLI 生成 `ti_msp_dl_config.c/h` → 检查生成宏名与代码一致 → 用 TI ArmClang 至少逐文件对象编译所有新增/修改 `.c` 与 `Debug/syscfg/ti_msp_dl_config.c`。只有 SysConfig 和编译都 0 报错，才允许回复用户“工程可用/可烧录”。若验证失败，必须修到通过；若本机缺少工具链导致无法验证，必须明确说“未验证，不能保证可编译”，不得假装通过。
+- **烧录前必须执行验证**：凡是用户要求“烧录、下载、flash、运行到板子”或给出可烧录工程时，必须在烧录前重新执行一次上述验证流程，并在最终回复写明验证结果。烧录不是验证；能烧进去不代表引脚/API/编译正确。
 - **所有代码必须带完整注释**：每个函数、每个关键变量、每段算法逻辑必须有中文注释说明 WHY
 - **模块化结构铁律**：按功能拆分为独立 .h/.c 文件，通过 `#include` 内联编译。**严禁全部代码堆在 main.c**。标准结构：
   ```
