@@ -240,6 +240,12 @@ workspace_ccstheia/
 │   ├── main.c                     BLE 通信 + PID 修改
 │   └── _jdy31_docs/              JDY-31 AT 指令
 │
+├── pid_tuner_car/                [PID 调试助手实车工程]
+│   ├── main.c                     PA25 启停 + 20ms 速度闭环
+│   ├── pid_tuner.c/h              UART0 CSV/SET/TARGET/STATUS 协议
+│   ├── motor.c/h                  TB6612FNG 电机控制
+│   └── encoder.c/h                PA15/PA17 编码器测速
+│
 ├── servo_test/                   [舵机云台]
 │   ├── main.c                     MPU6050 -> 舵机随动
 │   └── gimbal.c/h                 云台限幅/平滑
@@ -274,7 +280,8 @@ workspace_ccstheia/
 第1步: mpu6050_clean   (1-2天)  -> 编码器+PWM+PID底盘控制基础
 第2步: imu601          (1天)    -> UART vs I2C IMU方案 + 转弯PID
 第3步: jdy31_pid_test  (0.5天)  -> 蓝牙透传 + 在线改PID
-第4步: test_2           (2-3天)  -> K230+MSPM0G全链路 + LAB色块校准
+第4步: pid_tuner_car    (0.5天)  -> PID调试助手 + PA25启停 + 串口调参
+第5步: test_2           (2-3天)  -> K230+MSPM0G全链路 + LAB色块校准
 ```
 
 ---

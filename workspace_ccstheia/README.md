@@ -45,6 +45,12 @@ workspace_ccstheia/
 │   ├── imu601.c          IMU601 驱动
 │   └── _jdy31_docs/      JDY-31 技术文档
 │
+├── pid_tuner_car/      🖥️ PID 调试助手实车工程
+│   ├── main.c            PA25 启停 + 20ms 速度闭环
+│   ├── pid_tuner.c       UART0 CSV/SET/TARGET/STATUS 协议
+│   ├── motor.c           TB6612FNG A=右轮/B=左轮
+│   └── encoder.c         PA15/PA17 编码器边沿测速
+│
 ├── servo_test/         🎯 舵机云台测试
 │   ├── main.c            MPU6050 姿态 → 舵机随动
 │   ├── gimbal.c          云台控制逻辑
@@ -71,7 +77,8 @@ workspace_ccstheia/
 1. mpu6050_clean  ← 入门：理解底盘控制 + 编码器 + PID
 2. imu601         ← 进阶：IMU601 + 转弯控制
 3. jdy31_pid_test ← 调试：蓝牙遥控 + 参数整定
-4. test_2         ← 高级：K230 视觉 + 双芯通信
+4. pid_tuner_car  ← 上位机：PID 调试助手 + 实车闭环
+5. test_2         ← 高级：K230 视觉 + 双芯通信
 ```
 
 ## 硬件平台
