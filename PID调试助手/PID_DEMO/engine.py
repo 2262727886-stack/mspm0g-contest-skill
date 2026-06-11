@@ -22,10 +22,12 @@ def run_tuning_engine(bridge, config: Dict, current_pid: Dict[str, float],
         if abort_check and abort_check(): print("\n[INFO] Aborted"); break
         print(f"\n--- Round {rnd}/{max_rounds} ---")
         buffer.reset(); t0 = time.time()
+        if hasattr(bridge, "flush"):
+            bridge.flush()
         while len(buffer) < buffer_size and time.time() - t0 < 15.0:
             s = bridge.read_sample()
             if s: buffer.add(s);
-            if on_sample: on_sample(s)
+            if s and on_sample: on_sample(s)
             else: time.sleep(0.002)
 
         if len(buffer) < 10: print(f"  Insufficient data ({len(buffer)}), skip"); continue
@@ -52,6 +54,9 @@ def run_tuning_engine(bridge, config: Dict, current_pid: Dict[str, float],
         if notes != "no adjustment": print(f"  [GUARD] {notes}")
         print(f"  [APPLY] P={safe_pid['p']:.3f} I={safe_pid['i']:.3f} | {result.get('analysis_summary','')}")
         bridge.set_pid(safe_pid["p"], safe_pid["i"])
+        time.sleep(0.12)
+        if hasattr(bridge, "flush"):
+            bridge.flush()
         history.record(rnd, safe_pid, metrics, result.get("analysis_summary", ""))
         if on_round_complete: on_round_complete(rnd, safe_pid, metrics, result)
         time.sleep(0.1)   # 短暂等待 MCU 应用新 PID

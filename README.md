@@ -440,6 +440,10 @@ STATUS
 RESET
 ```
 
+协议硬性要求：PID 调试助手只支持 `timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki` 九字段 CSV，以及 `SET` / `TARGET` / `STATUS` / `RESET` / `STOP` 文本命令。`TARGET L:x R:x` 必须能回 `OK TARGET L=x R=x`，否则自动调参会停止；若仍看到 CSV 里的目标是 `20,20`，优先检查 CH340 TX 是否接到 PA11(RX)。
+
+上位机内置协议定义在 `PID调试助手/PID_DEMO/protocol.py`，固件协议说明在 `.claude/skills/mspm0g-contest/pid_tuner_protocol.md`。后续新增 PID 调试工程必须沿用这套协议，不能自行改字段顺序或回包格式。
+
 MSPM0G 需要持续输出 CSV 采样数据，至少包含以下字段顺序：
 
 ```text

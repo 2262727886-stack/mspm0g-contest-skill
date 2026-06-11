@@ -20,16 +20,61 @@ F = {"b":("Microsoft YaHei UI",10),"m":("Consolas",10),"h":("Microsoft YaHei UI"
      "big":("Consolas",24,"bold"),"s":("Microsoft YaHei UI",9),"title":("Microsoft YaHei UI",15,"bold"),
      "xl":("Consolas",30,"bold")}
 
+class RoundedButton(tk.Canvas):
+    def __init__(self,p,text,command=None,bg=None,fg=None,activebackground=None,activeforeground=None,
+                 padx=16,pady=7,font=None,radius=12,cursor="hand2",**kw):
+        self._text=text;self._cmd=command;self._bg=bg or C["card"];self._fg=fg or C["text"]
+        self._activebg=activebackground or C["hover"];self._activefg=activeforeground or self._fg
+        self._font=font or F["b"];self._radius=radius;self._enabled=True
+        w=max(82,len(str(text))*14+padx*2);h=34+pady//2
+        super().__init__(p,width=w,height=h,bg=p.cget("bg"),highlightthickness=0,bd=0,cursor=cursor,**kw)
+        self._draw(False)
+        self.bind("<Enter>",lambda e:self._draw(True))
+        self.bind("<Leave>",lambda e:self._draw(False))
+        self.bind("<Button-1>",self._click)
+
+    def _round_rect(self,x1,y1,x2,y2,r,**kw):
+        pts=[x1+r,y1,x2-r,y1,x2,y1,x2,y1+r,x2,y2-r,x2,y2,x2-r,y2,x1+r,y2,x1,y2,x1,y2-r,x1,y1+r,x1,y1]
+        return self.create_polygon(pts,smooth=True,**kw)
+
+    def _draw(self,hover=False):
+        self.delete("all")
+        fill=self._activebg if hover and self._enabled else self._bg
+        fg=self._activefg if hover and self._enabled else self._fg
+        outline="#cbd5e1" if fill in (C["card"],C["card2"],C["bg"]) else fill
+        self._round_rect(1,1,int(self["width"])-1,int(self["height"])-1,self._radius,fill=fill,outline=outline,width=1)
+        self.create_text(int(self["width"])//2,int(self["height"])//2,text=self._text,font=self._font,fill=fg)
+
+    def _click(self,_event):
+        if self._enabled and self._cmd:self._cmd()
+
+    def config(self,cnf=None,**kw):
+        if cnf:kw.update(cnf)
+        if "text" in kw:
+            self._text=kw.pop("text")
+            self["width"]=max(82,len(str(self._text))*14+24)
+        if "bg" in kw:self._bg=kw.pop("bg")
+        if "fg" in kw:self._fg=kw.pop("fg")
+        if "activebackground" in kw:self._activebg=kw.pop("activebackground")
+        if "activeforeground" in kw:self._activefg=kw.pop("activeforeground")
+        if "state" in kw:self._enabled=(kw.pop("state") != tk.DISABLED)
+        if kw:super().config(**kw)
+        self._draw(False)
+    configure=config
+
+    def cget(self,key):
+        if key=="text":return self._text
+        if key=="bg":return self._bg
+        if key=="fg":return self._fg
+        return super().cget(key)
+
 def _card(p,**kw):
     return tk.Frame(p,bg=C["card"],highlightbackground=C["border"],highlightthickness=1,padx=14,pady=12,**kw)
 def _btn(p,text,cmd,pri=False):
     bg=C["accent"] if pri else C["card"];fg="white" if pri else C["text"]
-    b=tk.Button(p,text=f" {text} ",command=cmd,font=("Microsoft YaHei UI",10),bg=bg,fg=fg,
-                activebackground="#4338ca" if pri else C["hover"],
-                activeforeground="white" if pri else C["text"],
-                relief=tk.FLAT,bd=0 if pri else 1,padx=16,pady=7,cursor="hand2",
-                highlightbackground=C["border"] if not pri else bg,highlightthickness=0)
-    return b
+    return RoundedButton(p,text=f" {text} ",command=cmd,font=("Microsoft YaHei UI",10),bg=bg,fg=fg,
+                         activebackground="#0d9488" if pri else C["hover"],
+                         activeforeground="white" if pri else C["text"])
 def _lbl(p,text,font=None,fg=None,**kw):
     return tk.Label(p,text=text,font=font or F["b"],fg=fg or C["text"],bg=p.cget("bg"),**kw)
 def _ent(p,default,w=8):
@@ -112,7 +157,7 @@ class Curve(tk.Canvas):
 # ═══ 主应用 ═══
 class App:
     def __init__(self,root):
-        self.root=root;self.root.title("MSPM0G3507 PID 调参工具")
+        self.root=root;self.root.title("MSPM0G3507 PID 调参工具 v0.4")
         self.root.geometry("1180x760");self.root.minsize(980,620)
         self.root.configure(bg=C["bg"])
         self._style_ttk()
@@ -204,7 +249,7 @@ class App:
         _lbl(self._left,"端口号和波特率在顶部栏修改",F["s"],C["muted"],wraplength=136,justify=tk.LEFT).pack(anchor=tk.W,padx=16)
 
         tk.Frame(self._left,bg=C["border"],height=1).pack(fill=tk.X,padx=10,pady=(16,4))
-        _lbl(self._left,"v0.3",F["s"],C["muted"]).pack(side=tk.BOTTOM,anchor=tk.W,padx=16,pady=10)
+        _lbl(self._left,"v0.4",F["s"],C["muted"]).pack(side=tk.BOTTOM,anchor=tk.W,padx=16,pady=10)
 
         # ── 中间: 设置内容 ──
         self._center=tk.Frame(main,bg=C["bg"])
@@ -264,7 +309,8 @@ class App:
         self._auto_rnd=_ent(r,15,4);self._auto_rnd.pack(side=tk.LEFT,padx=(0,8))
         _lbl(r,"目标:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
         self._auto_tgt=_ent(r,60,4);self._auto_tgt.pack(side=tk.LEFT)
-        _btn(r,"开始调参",self._auto_start,pri=True).pack(side=tk.RIGHT)
+        self._auto_btn=_btn(r,"开始调参",self._auto_start,pri=True)
+        self._auto_btn.pack(side=tk.RIGHT)
         # mode status
         self._auto_mode_lbl=_lbl(r,"",F["s"],C["muted"])
         self._auto_mode_lbl.pack(side=tk.RIGHT,padx=(0,10))
@@ -300,16 +346,8 @@ class App:
         except:tgt=60
         self._auto_log.delete(1.0,tk.END);self._curve.clear();self.q.put(("target",tgt))
         self._auto_log_msg(f"[自动调参] 算法: {algo} | 轮次: {mr} | 目标: {tgt}")
-        # 找按钮
-        for c in self._pages["auto"].winfo_children():
-            if isinstance(c,tk.Frame):
-                for cc in c.winfo_children():
-                    if isinstance(cc,tk.Frame):
-                        for b in cc.winfo_children():
-                            if isinstance(b,tk.Button) and ("开始" in (b.cget("text") or "") or "停止" in (b.cget("text") or "")):
-                                self._auto_btn=b
         if hasattr(self,'_auto_btn'):
-            self._auto_btn.config(text="  停止  ",bg=C["red"],fg="white")
+            self._auto_btn.config(text=" 停止 ",bg=C["red"],fg="white")
         threading.Thread(target=self._auto_worker,args=(algo,mr,tgt),daemon=True).start()
 
     def _auto_worker(self,algo,mr,tgt):
@@ -342,6 +380,17 @@ class App:
             using_hw=True
             self._auto_log_msg("[硬件模式] 串口调参")
             bridge.flush()
+            self._auto_log_msg(f"[TARGET] send L:{tgt} R:{tgt}")
+            if not bridge.set_target_checked(tgt,tgt,timeout_s=3.0):
+                raw = " | ".join(getattr(bridge, "last_probe_lines", [])[-5:])
+                bridge.disconnect()
+                self._auto_log_msg("[ERROR] MCU target echo mismatch. Flash latest pid_tuner_car firmware first.")
+                if raw:
+                    self._auto_log_msg(f"[RX] {raw}")
+                else:
+                    self._auto_log_msg("[RX] no response after TARGET/STATUS")
+                self.q.put(("done",None));return
+            bridge.flush()
             self._auto_log_msg("[检测] 等待数据...")
             samples=bridge.read_samples(5,timeout_s=6.0)
             if len(samples)<2:
@@ -358,7 +407,11 @@ class App:
         best_p={"p":3.0,"i":0.0,"d":0.0};best_err=999
         for test_kp in [3.0,6.0,10.0]:
             if self._stop_event.is_set():self._auto_log_msg("[已停止]");self.q.put(("done",None));return
-            if using_hw: bridge.set_pid(test_kp,0,0)
+            if using_hw:
+                bridge.set_target(tgt,tgt)
+                bridge.set_pid(test_kp,0,0)
+                time.sleep(0.12)
+                bridge.flush()
             else: bridge.sim.set_pid(test_kp,0,0)
             buf=SpeedBuffer(60)
             for sample_idx in range(60):
@@ -372,7 +425,7 @@ class App:
             last_s=buf._data[-1] if len(buf)>0 else {}
             cur_v=(last_s.get("speed_L",0)+last_s.get("speed_R",0))/2
             self.q.put(("curve",cur_v))
-            self._auto_log_msg(f"  预热 P={test_kp:.1f}: speed={cur_v:.0f} tgt={tgt} err={m['avg_error']:.1f} [{m['status']}]")
+            self._auto_log_msg(f"  预热 P={test_kp:.1f}: speed={cur_v:.0f} tgt={m.get('avg_target',tgt):.0f} err={m['avg_error']:.1f} [{m['status']}]")
             if m["avg_error"]<best_err:best_err=m["avg_error"];best_p={"p":test_kp,"i":0.0,"d":0.0}
         # 最佳 P 加初始 I
         best_p["i"]=best_p["p"]*0.3
@@ -401,7 +454,7 @@ class App:
                     self.q.put(("curve",m.get("avg_speed",0))),
                     self.q.put(("score",f"{max(0,100-m['avg_error']*2-m['overshoot']*0.3):.0f}%")),
                     self.q.put(("rec",f"P={pid['p']:.3f} I={pid['i']:.3f}")),
-                    self._auto_log_msg(f"R{r}: speed={m.get('avg_speed',0):.0f} tgt={tgt} err={m['avg_error']:.1f} [{m['status']}] P={pid['p']:.3f} I={pid['i']:.3f}"),
+                    self._auto_log_msg(f"R{r}: speed={m.get('avg_speed',0):.0f} tgt={m.get('avg_target',tgt):.0f} err={m['avg_error']:.1f} [{m['status']}] P={pid['p']:.3f} I={pid['i']:.3f}"),
                     (res and res.get("analysis_summary","")) and self._auto_log_msg(f"  LLM: {res.get('analysis_summary','')}")
                 ),
                 abort_check=lambda:self._stop_event.is_set()

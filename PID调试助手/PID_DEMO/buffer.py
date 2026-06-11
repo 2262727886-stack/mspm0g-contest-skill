@@ -14,8 +14,10 @@ class SpeedBuffer:
         errs = [max(abs(s.get("speed_L",0)-s.get("target_L",0)), abs(s.get("speed_R",0)-s.get("target_R",0))) for s in self._data]
         avg = sum(errs)/len(errs)
         avg_speed = sum((s.get("speed_L",0)+s.get("speed_R",0))/2 for s in self._data)/len(self._data)
+        avg_target = sum((s.get("target_L",0)+s.get("target_R",0))/2 for s in self._data)/len(self._data)
+        avg_pwm = sum((s.get("pwm_L",0)+s.get("pwm_R",0))/2 for s in self._data)/len(self._data)
         mx = max(max(abs(s.get("speed_L",0)),abs(s.get("speed_R",0))) for s in self._data)
-        tgt = max(abs(self._data[0].get("target_L",0)),abs(self._data[0].get("target_R",0))) or 1
+        tgt = max(1.0, abs(avg_target))
         overshoot = max(0,(mx/tgt-1)*100)
         speed_ratio = avg_speed / tgt
         ss = sum(errs[len(errs)*7//10:])/max(1,len(errs)-len(errs)*7//10)
@@ -29,7 +31,7 @@ class SpeedBuffer:
             st = "SLOW_RESPONSE"
         else:
             st = "STABLE"
-        return {"status":st,"avg_error":round(avg,2),"avg_speed":round(avg_speed,2),"speed_ratio":round(speed_ratio,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc,1),"sample_count":len(self._data)}
+        return {"status":st,"avg_error":round(avg,2),"avg_speed":round(avg_speed,2),"avg_target":round(avg_target,2),"avg_pwm":round(avg_pwm,1),"speed_ratio":round(speed_ratio,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc,1),"sample_count":len(self._data)}
 
     def to_prompt_data(self) -> str:
         if len(self._data) < 5: return "# Insufficient data"
@@ -38,6 +40,8 @@ class SpeedBuffer:
                  f"Target: {last.get('target_L','?')} pulse/20ms", "",
                  f"Status: {m['status']}", f"Avg Error: {m['avg_error']}",
                  f"Avg Speed: {m.get('avg_speed', 0)}",
+                 f"Avg Target: {m.get('avg_target', 0)}",
+                 f"Avg PWM: {m.get('avg_pwm', 0)}",
                  f"Speed Ratio: {m.get('speed_ratio', 0)}",
                  f"Overshoot: {m['overshoot']:.1f}%", f"Steady State Error: {m['steady_state_error']}",
                  f"Oscillation: {m['oscillation_index']}", "", "idx,speed_L,target,speed_R"]

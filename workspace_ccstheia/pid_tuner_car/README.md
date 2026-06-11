@@ -29,6 +29,8 @@ RESET
 STOP
 ```
 
+自动调参 GUI 内置并强制使用上述文本协议。`TARGET L:x R:x` 必须返回 `OK TARGET L=x R=x`，`STATUS` 必须返回 `TL=x TR=x`，否则 GUI 会认为 PC 到 MCU 的 RX 链路未打通并停止调参。
+
 ## MCU -> PC CSV
 
 每 40ms 输出一行：
@@ -46,6 +48,7 @@ timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki
 ## 调试建议
 
 - 首次测试必须架空车轮。
+- 串口必须全双工交叉接线：PA10(TX) 接 CH340 RX，PA11(RX) 接 CH340 TX，并共地。
 - 先发送 `TARGET L:20 R:20` 和 `SET P:2.0000 I:0.0000 D:0.0000`，确认速度能被 P-only 拉住，再逐步加 I。
 - 本工程默认只做正向速度闭环，PID 输出不会反向倒车。
 - PWM 前馈按目标速度线性给出，默认 `8 PWM/脉冲`；如果速度长期高于目标，先降低 P/I，不要继续加 I。

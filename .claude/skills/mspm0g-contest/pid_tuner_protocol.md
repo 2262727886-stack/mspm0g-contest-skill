@@ -2,6 +2,8 @@
 
 PC 端 PID 自动调参工具与 MSPM0G3507 固件的通信协议。用户若要使用自动 PID 调参功能，MCU 固件必须按此模板实现。
 
+> **硬性规范**：PID 调试助手只支持本页定义的 UART 协议。固件若没有实现本协议，尤其是 `TARGET`/`STATUS` 回包和 9 字段 CSV，GUI 会判定通信未就绪，不能进入自动调参。
+
 ---
 
 ## 1. 通信概述
@@ -13,6 +15,14 @@ PC 端 PID 自动调参工具与 MSPM0G3507 固件的通信协议。用户若要
 | 通信方式 | 全双工: MCU 持续发 CSV 数据, PC 随时发文本命令 |
 | MCU→PC 格式 | CSV 行, `\r\n` 结尾 |
 | PC→MCU 格式 | 文本命令, `\r\n` 结尾 |
+
+**接线必须交叉**：
+
+| 方向 | 接线 |
+|------|------|
+| MCU 发数据 | MSPM0G `PA10/UART0_TX` → CH340/USB 串口 `RX` |
+| PC 发命令 | CH340/USB 串口 `TX` → MSPM0G `PA11/UART0_RX` |
+| 共地 | CH340/USB 串口 `GND` ↔ MSPM0G `GND` |
 
 ---
 
@@ -49,15 +59,18 @@ timestamp,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki\r\n
 
 | 命令 | 格式 | 说明 | 应答 |
 |------|------|------|------|
-| SET | `SET P:3.5 I:1.2\r\n` | 修改 Kp/Ki | `OK P=3.500 I=1.200` |
-| STATUS | `STATUS\r\n` | 查询当前状态 | `P=3.500 I=1.200 TGT=60` |
+| SET | `SET P:3.5 I:1.2\r\n` | 修改 Kp/Ki | `OK P=3.500 I=1.200 D=0.000` |
+| SET+D | `SET P:3.5 I:1.2 D:0.0\r\n` | 修改 Kp/Ki/Kd | `OK P=3.500 I=1.200 D=0.000` |
+| STATUS | `STATUS\r\n` | 查询当前状态 | `P=3.500 I=1.200 D=0.000 TL=60 TR=60` |
 | RESET | `RESET\r\n` | 恢复默认 PID | `OK RESET` |
-| TARGET | `TARGET L:60 R:60\r\n` | 修改目标速度 | `OK TARGET=60` |
+| STOP | `STOP\r\n` | 目标速度清零并停车 | `OK STOP` |
+| TARGET | `TARGET L:60 R:60\r\n` | 修改左右轮目标速度 | `OK TARGET L=60 R=60` |
 
 **注意**:
 - 命令以 `\r\n` 结尾
 - SET 命令同时修改左右轮 PID (当前版本共用参数)
 - Kp 范围: 0.1 ~ 50.0, Ki 范围: 0.0 ~ 20.0
+- 自动调参启动时会先发送 `TARGET L:<目标> R:<目标>`，并等待 `OK TARGET L=<目标> R=<目标>`、`STATUS` 中 `TL/TR` 匹配，或 CSV 中 `target_L/target_R` 匹配。若仍回显 `20,20`，说明 PC→MCU 的 RX 线未通或固件不是最新协议。
 
 ---
 
