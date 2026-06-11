@@ -25,7 +25,7 @@
 
 #define SPEED_PERIOD_MS       20U
 #define CSV_PERIOD_MS         40U
-#define DEFAULT_PWM_FEED      500
+#define DEFAULT_PWM_PER_PULSE 8
 #define DEFAULT_PWM_LIMIT     1500
 
 static volatile uint32_t g_ms_ticks;
@@ -82,9 +82,9 @@ int main(void)
     pid_tuner_init();
 
     speed_pid_init(&pid_left, g_pid_tuner.kp, g_pid_tuner.ki,
-        g_pid_tuner.kd, DEFAULT_PWM_FEED, DEFAULT_PWM_LIMIT);
+        g_pid_tuner.kd, DEFAULT_PWM_PER_PULSE, DEFAULT_PWM_LIMIT);
     speed_pid_init(&pid_right, g_pid_tuner.kp, g_pid_tuner.ki,
-        g_pid_tuner.kd, DEFAULT_PWM_FEED, DEFAULT_PWM_LIMIT);
+        g_pid_tuner.kd, DEFAULT_PWM_PER_PULSE, DEFAULT_PWM_LIMIT);
 
     motor_stop();
     set_run_led(false);

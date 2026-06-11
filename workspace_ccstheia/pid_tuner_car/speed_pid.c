@@ -1,14 +1,14 @@
 #include "speed_pid.h"
 
 void speed_pid_init(SpeedPid *pid, float kp, float ki, float kd,
-                    int16_t feedforward, int16_t limit)
+                    int16_t pwm_per_pulse, int16_t limit)
 {
     pid->kp = kp;
     pid->ki = ki;
     pid->kd = kd;
     pid->integral = 0.0f;
     pid->last_error = 0.0f;
-    pid->feedforward = feedforward;
+    pid->pwm_per_pulse = pwm_per_pulse;
     pid->output_limit = limit;
 }
 
@@ -34,7 +34,7 @@ int16_t speed_pid_update(SpeedPid *pid, int16_t target, int16_t current)
     if (pid->integral > 300.0f) pid->integral = 300.0f;
     if (pid->integral < -300.0f) pid->integral = -300.0f;
 
-    output = (float)pid->feedforward
+    output = (float)(target * pid->pwm_per_pulse)
            + pid->kp * error
            + pid->ki * pid->integral
            + pid->kd * derivative;

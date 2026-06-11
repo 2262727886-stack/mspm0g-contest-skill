@@ -17,11 +17,19 @@ class SpeedBuffer:
         mx = max(max(abs(s.get("speed_L",0)),abs(s.get("speed_R",0))) for s in self._data)
         tgt = max(abs(self._data[0].get("target_L",0)),abs(self._data[0].get("target_R",0))) or 1
         overshoot = max(0,(mx/tgt-1)*100)
+        speed_ratio = avg_speed / tgt
         ss = sum(errs[len(errs)*7//10:])/max(1,len(errs)-len(errs)*7//10)
         zc = sum(1 for i in range(1,len(errs)) if (errs[i]-avg)*(errs[i-1]-avg)<0)
         osc = zc/max(1,len(errs))*100
-        st = "OSCILLATING" if osc>15 else ("OVERSHOOTING" if overshoot>15 else ("SLOW_RESPONSE" if avg>10 else "STABLE"))
-        return {"status":st,"avg_error":round(avg,2),"avg_speed":round(avg_speed,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc,1),"sample_count":len(self._data)}
+        if speed_ratio > 1.15 or overshoot > 20:
+            st = "OVERSPEED"
+        elif osc > 25 and avg > 3:
+            st = "OSCILLATING"
+        elif avg > 10:
+            st = "SLOW_RESPONSE"
+        else:
+            st = "STABLE"
+        return {"status":st,"avg_error":round(avg,2),"avg_speed":round(avg_speed,2),"speed_ratio":round(speed_ratio,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc,1),"sample_count":len(self._data)}
 
     def to_prompt_data(self) -> str:
         if len(self._data) < 5: return "# Insufficient data"
@@ -29,6 +37,8 @@ class SpeedBuffer:
         lines = ["# MSPM0G3507 Speed PI Data", f"Kp={last.get('Kp','?')}, Ki={last.get('Ki','?')}",
                  f"Target: {last.get('target_L','?')} pulse/20ms", "",
                  f"Status: {m['status']}", f"Avg Error: {m['avg_error']}",
+                 f"Avg Speed: {m.get('avg_speed', 0)}",
+                 f"Speed Ratio: {m.get('speed_ratio', 0)}",
                  f"Overshoot: {m['overshoot']:.1f}%", f"Steady State Error: {m['steady_state_error']}",
                  f"Oscillation: {m['oscillation_index']}", "", "idx,speed_L,target,speed_R"]
         step = max(1, len(self._data)//30)

@@ -24,7 +24,8 @@ def apply_pid_guardrails(current: Dict, candidate: Dict, limits: Optional[Dict] 
 def build_fallback_suggestion(current: Dict, metrics: Dict) -> Dict:
     p, i, d = current.get("p", 3.0), current.get("i", 1.0), current.get("d", 0.0)
     status = metrics.get("status", "STABLE")
-    if status == "OSCILLATING": p *= 0.7; d = 0.5
+    if status == "OVERSPEED": p *= 0.55; i *= 0.25; d = 0.0
+    elif status == "OSCILLATING": p *= 0.7; i *= 0.6; d = 0.5
     elif status == "OVERSHOOTING": p *= 0.8; i *= 0.5
     elif status == "SLOW_RESPONSE": p *= 1.3; i = min(i * 1.5, 1.0) if i < 1.0 else i
     else: p *= 0.95
