@@ -4,7 +4,7 @@
 
 - 定时器周期/模式/引脚全在 SysConfig 配置，**`DL_TimerG_setPeriod()` 不存在**！
 - **TIMA0 是 TimerA 实例，必须用 `DL_TimerA_xxx()` 系列，不是 `DL_TimerG_xxx()`**！
-- TIMA0 `DL_TimerA_setCaptureCompareValue` 参数顺序: **(inst, value, index)** — 与 TIMG 的 `(inst, index, value)` 不同！
+- `DL_TimerG_setCaptureCompareValue` / `DL_TimerA_setCaptureCompareValue` 参数顺序均为: **(inst, value, index)**
 - TIMG PWM 默认 edge-aligned **up-count**: CC=0→输出100%, CC=period→输出0%
 - 可用定时器白名单: 仅 TIMG0, TIMG6, TIMG7, TIMG8, TIMG12, TIMA0
 
@@ -33,11 +33,11 @@ ADD → Timer G → Name: TIMG_8 → Mode: PWM
 // PWM 启动和占空比调整
 // ⚠️ A通道(PB15, CH0)=右轮, B通道(PB16, CH1)=左轮
 DL_TimerG_startCounter(TIMG8);
-DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_0_INDEX, duty_a);  // CH0=PB15=右轮
-DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_1_INDEX, duty_b);  // CH1=PB16=左轮
+DL_TimerG_setCaptureCompareValue(TIMG8, duty_a, DL_TIMER_CC_0_INDEX);  // CH0=PB15=右轮
+DL_TimerG_setCaptureCompareValue(TIMG8, duty_b, DL_TIMER_CC_1_INDEX);  // CH1=PB16=左轮
 
 // 刹车: 占空比设为 period (输出常低)
-DL_TimerG_setCaptureCompareValue(TIMG8, DL_TIMER_CC_0_INDEX, 4000);
+DL_TimerG_setCaptureCompareValue(TIMG8, 4000, DL_TIMER_CC_0_INDEX);
 ```
 
 ## SysConfig 配置 TIMA0 舵机 PWM
