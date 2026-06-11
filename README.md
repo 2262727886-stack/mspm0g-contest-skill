@@ -31,6 +31,7 @@
 - [推荐学习路径](#推荐学习路径)
 - [Claude Code Skill 完整指南](#claude-code-skill-完整指南)
 - [PID 调参指南](#pid-调参指南)
+- [PID 调试助手配置方法](#pid-调试助手配置方法)
 - [K230 视觉方案](#k230-视觉方案)
 - [开发环境搭建](#开发环境搭建)
 - [烧录方法](#烧录方法)
@@ -252,6 +253,13 @@ workspace_ccstheia/
 ├── mpu6050/                      [MPU6050 原始工程]
 ├── my_TI/                        [基础外设测试]
 ├── test_1/                       [PID 参数调优]
+│
+├── PID调试助手/                  [Python PID 上位机]
+│   ├── PID_DEMO/                  GUI、串口桥接、自动调参引擎
+│   ├── config.example.json        配置模板
+│   ├── requirements.txt           Python 依赖
+│   └── build_exe.bat              Windows exe 打包脚本
+│
 ├── empty_LP_MSPM0G3507_nortos_ticlang/  [空工程模板]
 │
 └── .vscode/
@@ -339,6 +347,119 @@ workspace_ccstheia/
 发送 "KP 3.5" -> 修改速度Kp
 发送 "KI 1.2" -> 修改速度Ki
 ```
+
+### PID 调试助手配置方法
+
+`PID调试助手/` 是一个 Python 上位机，支持仿真调参、串口连接 MSPM0G 实机、实时曲线显示和 LLM 辅助推荐 PID 参数。
+
+#### 1. 安装依赖
+
+```bash
+cd PID调试助手
+python -m pip install -r requirements.txt
+```
+
+如果要打包成 exe，还需要安装 PyInstaller：
+
+```bash
+python -m pip install pyinstaller
+```
+
+#### 2. 创建配置文件
+
+复制配置模板：
+
+```bash
+copy config.example.json config.json
+```
+
+常用配置项：
+
+| 字段 | 示例 | 说明 |
+|------|------|------|
+| `SERIAL_PORT` | `AUTO` / `COM5` | 串口自动识别或手动指定 |
+| `BAUD_RATE` | `115200` | MCU 串口波特率 |
+| `LLM_API_KEY` | `sk-...` | 使用 LLM 自动调参时填写 |
+| `LLM_API_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容接口地址 |
+| `LLM_MODEL_NAME` | `gpt-4o` | 模型名称 |
+| `TUNING_MODE` | `speed_pi` | 当前调参模式 |
+| `BUFFER_SIZE` | `100` | 每轮采样数量 |
+| `MAX_TUNING_ROUNDS` | `30` | 自动调参最大轮数 |
+
+不使用 LLM 时，可以先保留 `LLM_API_KEY` 的占位值，使用“仿真”或“手动配置”功能。
+
+#### 3. 启动 GUI
+
+```bash
+python PID_DEMO/gui.py
+```
+
+界面顶部选择串口和波特率，点击“连接设备”。左侧可以切换：
+
+| 页面 | 用途 |
+|------|------|
+| 自动调参 | 仿真或硬件自动调参 |
+| 手动配置 | 手动输入 Kp/Ki/Kd 并观察曲线 |
+| LLM 设置 | 配置 API Key、Base URL、模型和代理 |
+
+#### 4. 命令行启动
+
+仿真模式：
+
+```bash
+python PID_DEMO/launcher.py --sim
+```
+
+硬件串口模式：
+
+```bash
+python PID_DEMO/launcher.py --hardware
+```
+
+指定配置文件：
+
+```bash
+python PID_DEMO/launcher.py --hardware --config config.json
+```
+
+#### 5. MCU 串口协议要求
+
+调试助手会向 MSPM0G 发送以下文本命令：
+
+```text
+SET P:3.0000 I:1.0000 D:0.0000
+TARGET L:60 R:60
+STATUS
+RESET
+```
+
+MSPM0G 需要持续输出 CSV 采样数据，至少包含以下字段顺序：
+
+```text
+timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki
+```
+
+示例：
+
+```text
+1200,58,59,60,60,780,790,3.0,1.0
+1220,60,60,60,60,760,765,3.0,1.0
+```
+
+#### 6. 打包 Windows exe
+
+```bash
+cd PID调试助手
+build_exe.bat
+```
+
+成功后生成：
+
+```text
+dist\mspm0g-pid-tuner.exe
+```
+
+运行 exe 前，把 `config.example.json` 复制为同目录的 `config.json`，并按你的串口和 LLM 接口修改配置。
 
 ---
 
