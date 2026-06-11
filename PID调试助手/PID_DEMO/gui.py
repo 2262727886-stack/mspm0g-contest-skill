@@ -10,14 +10,18 @@ from tkinter import ttk, scrolledtext, messagebox
 from PID_DEMO.config import load_config, DEFAULT_CONFIG
 
 # ═══ 设计系统 ═══
-C = {"bg":"#f3f4f6","card":"#fff","hover":"#e5e7eb","border":"#d1d5db",
-     "text":"#111827","sub":"#6b7280","muted":"#9ca3af",
-     "accent":"#4f46e5","green":"#059669","red":"#dc2626","amber":"#d97706","blue":"#2563eb","pink":"#c026d3"}
+C = {
+    "bg":"#eef2f6","card":"#ffffff","card2":"#f8fafc","hover":"#e6edf5","border":"#d8e0ea",
+    "text":"#111827","sub":"#526070","muted":"#94a3b8","plot":"#fbfdff",
+    "accent":"#0f766e","accent2":"#1d4ed8","green":"#059669","red":"#dc2626",
+    "amber":"#d97706","blue":"#2563eb","pink":"#be185d","logbg":"#0f172a","logfg":"#dbeafe"
+}
 F = {"b":("Microsoft YaHei UI",10),"m":("Consolas",10),"h":("Microsoft YaHei UI",12,"bold"),
-     "big":("Consolas",22,"bold"),"s":("Microsoft YaHei UI",9),"title":("Microsoft YaHei UI",14,"bold")}
+     "big":("Consolas",24,"bold"),"s":("Microsoft YaHei UI",9),"title":("Microsoft YaHei UI",15,"bold"),
+     "xl":("Consolas",30,"bold")}
 
 def _card(p,**kw):
-    return tk.Frame(p,bg=C["card"],highlightbackground=C["border"],highlightthickness=1,padx=12,pady=10,**kw)
+    return tk.Frame(p,bg=C["card"],highlightbackground=C["border"],highlightthickness=1,padx=14,pady=12,**kw)
 def _btn(p,text,cmd,pri=False):
     bg=C["accent"] if pri else C["card"];fg="white" if pri else C["text"]
     b=tk.Button(p,text=f" {text} ",command=cmd,font=("Microsoft YaHei UI",10),bg=bg,fg=fg,
@@ -32,11 +36,20 @@ def _ent(p,default,w=8):
     e=tk.Entry(p,font=F["b"],fg=C["text"],bg=C["bg"],relief=tk.FLAT,width=w,
                highlightbackground=C["border"],highlightthickness=1,insertbackground=C["accent"])
     e.insert(0,str(default));e.pack(ipady=3);return e
+def _log_widget(p):
+    return scrolledtext.ScrolledText(p,font=F["m"],bg=C["logbg"],fg=C["logfg"],
+                                     insertbackground=C["logfg"],relief=tk.FLAT,
+                                     padx=12,pady=8,wrap=tk.WORD)
+def _section_label(p,title,sub=None):
+    row=tk.Frame(p,bg=p.cget("bg"));row.pack(fill=tk.X,pady=(0,8))
+    _lbl(row,title,F["b"],C["text"]).pack(side=tk.LEFT)
+    if sub:_lbl(row,sub,F["s"],C["sub"]).pack(side=tk.RIGHT)
+    return row
 
 # ═══ 实时曲线 ═══
 class Curve(tk.Canvas):
     def __init__(self,p,h=240):
-        super().__init__(p,height=h,bg="white",highlightthickness=1,highlightbackground=C["border"],bd=0)
+        super().__init__(p,height=h,bg=C["plot"],highlightthickness=1,highlightbackground=C["border"],bd=0)
         self.H=h;self.data=[];self.target=60;self.max_pts=200;self.max_y=120
         self.bind("<Configure>",lambda e:self.draw())
     def add(self,v,t=None):
@@ -44,36 +57,42 @@ class Curve(tk.Canvas):
         self.data.append(v)
         if len(self.data)>self.max_pts:self.data.pop(0)
         self.draw()
-    def _axes(self,w,h):
-        M=40;R=12;B=28  # margins: left, right, bottom
+    def _axes(self,w,h,min_y,max_y):
+        M=46;R=16;B=30  # margins: left, right, bottom
         pw=w-M-R;ph=h-B-20
         if pw<10:return M,R,B,pw,ph
-        # grid + y-axis
         n_ticks=4
         for i in range(n_ticks+1):
-            y=B+ph-ph*i/n_ticks;val=self.max_y*i/n_ticks
-            self.create_line(M,y,w-R,y,fill="#f0f0f0",dash=(2,4) if i>0 else None,width=1)
+            val=min_y+(max_y-min_y)*i/n_ticks
+            y=B+ph-ph*i/n_ticks
+            self.create_line(M,y,w-R,y,fill="#e8eef5",dash=(2,4) if i>0 else None,width=1)
             self.create_text(M-4,y,text=f"{val:.0f}",font=("Consolas",8),fill=C["sub"],anchor=tk.E)
-        # x-axis
+        if min_y < 0 < max_y:
+            zy=B+ph-ph*(0-min_y)/(max_y-min_y)
+            self.create_line(M,zy,w-R,zy,fill="#cbd5e1",width=1.2)
         self.create_line(M,B,w-R,B,fill=C["border"])
         self.create_text(w//2,B+16,text="采样点",font=F["s"],fill=C["sub"],anchor=tk.N)
-        # y-axis label
         self.create_text(8,h//2,text="速度",font=F["s"],fill=C["sub"],anchor=tk.S,angle=90)
         return M,R,B,pw,ph
     def draw(self):
         self.delete("all");w=self.winfo_width();h=self.H
         if w<10:return
-        M,R,B,pw,ph=self._axes(w,h)
+        vals=self.data+[self.target]
+        min_y=min(0,min(vals) if vals else 0)
+        max_y=max(self.max_y,max(vals) if vals else self.max_y)
+        if max_y-min_y<10:max_y=min_y+10
+        M,R,B,pw,ph=self._axes(w,h,min_y,max_y)
         n=len(self.data)
         if n<2 or ph<1:return
-        # target line
-        ty=B+ph-ph*min(self.target,self.max_y)/self.max_y
+        def ymap(v):
+            v=max(min_y,min(max_y,v))
+            return B+ph-ph*(v-min_y)/(max_y-min_y)
+        ty=ymap(self.target)
         self.create_line(M,ty,w-R,ty,fill=C["red"],dash=(6,3),width=1.5,tags="curve")
         self.create_text(w-R,ty-8,text=f"目标={self.target:.0f}",font=("Consolas",8),fill=C["red"],anchor=tk.E,tags="curve")
-        # speed curve
         pts=[]
         for i in range(n):
-            x=M+pw*i/max(1,n-1);y=B+ph-ph*min(self.data[i],self.max_y)/self.max_y
+            x=M+pw*i/max(1,n-1);y=ymap(self.data[i])
             pts.extend([x,y])
         if len(pts)>=4:
             for i in range(0,len(pts)-2,2):
@@ -83,20 +102,20 @@ class Curve(tk.Canvas):
             lx=pts[-2];ly=pts[-1]
             self.create_oval(lx-4,ly-4,lx+4,ly+4,fill=C["accent"],outline="white",width=2,tags="curve")
             self.create_text(lx+10,ly-8,text=f"{self.data[-1]:.1f}",font=("Consolas",9,"bold"),fill=C["accent"],anchor=tk.W,tags="curve")
-        # legend
-        self.create_rectangle(M+6,6,M+80,22,fill="white",outline=C["border"],tags="curve")
+        self.create_rectangle(M+6,6,M+126,24,fill=C["card"],outline=C["border"],tags="curve")
         self.create_line(M+12,14,M+28,14,fill=C["accent"],width=2,tags="curve")
         self.create_text(M+44,14,text="速度",font=F["s"],fill=C["text"],anchor=tk.W,tags="curve")
         self.create_line(M+82,14,M+92,14,fill=C["red"],dash=(4,2),tags="curve")
         self.create_text(M+106,14,text="目标",font=F["s"],fill=C["red"],anchor=tk.W,tags="curve")
-    def clear(self):self.data.clear();self.delete("all");self._axes(self.winfo_width(),self.H)
+    def clear(self):self.data.clear();self.delete("all");self._axes(self.winfo_width(),self.H,0,self.max_y)
 
 # ═══ 主应用 ═══
 class App:
     def __init__(self,root):
         self.root=root;self.root.title("MSPM0G3507 PID 调参工具")
-        self.root.geometry("1060x720");self.root.minsize(900,560)
+        self.root.geometry("1180x760");self.root.minsize(980,620)
         self.root.configure(bg=C["bg"])
+        self._style_ttk()
         self.config=load_config("config.json") if os.path.exists("config.json") else dict(DEFAULT_CONFIG)
         self.running=False;self._stop_event=threading.Event();self.q=queue.Queue();self.pid={"p":5.0,"i":2.0,"d":0.0}
         self._bridge=None;self._conn=False;self.mode="auto"
@@ -105,26 +124,36 @@ class App:
         self._show_page("auto")
         self._poll()
 
+    def _style_ttk(self):
+        style=ttk.Style()
+        try:style.theme_use("clam")
+        except:pass
+        style.configure("TCombobox",fieldbackground=C["card2"],background=C["card2"],
+                        foreground=C["text"],arrowcolor=C["accent"],padding=3)
+
     # ═══ 顶部串口栏 ═══
     def _top_bar(self):
-        b=tk.Frame(self.root,bg=C["card"],height=42);b.pack(fill=tk.X);b.pack_propagate(False)
-        _lbl(b,"MSPM0G3507 PID 调参",F["title"],C["accent"]).pack(side=tk.LEFT,padx=14,pady=8)
-        _lbl(b,"端口",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(20,4),pady=14)
+        b=tk.Frame(self.root,bg=C["card"],height=58,highlightbackground=C["border"],highlightthickness=0)
+        b.pack(fill=tk.X);b.pack_propagate(False)
+        title=tk.Frame(b,bg=C["card"]);title.pack(side=tk.LEFT,padx=16,pady=8)
+        _lbl(title,"MSPM0G3507 PID 调参",F["title"],C["accent"]).pack(anchor=tk.W)
+        _lbl(title,"串口采样 / 自动整定 / 稳定性评估",F["s"],C["sub"]).pack(anchor=tk.W)
+        _lbl(b,"端口",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(26,4),pady=20)
         self._tb_port=ttk.Combobox(b,values=self._scan_ports(),width=9,font=F["b"])
         self._tb_port.set(self.config.get("SERIAL_PORT","AUTO"))
-        self._tb_port.pack(side=tk.LEFT,ipady=0,pady=10)
-        _btn(b,"刷新",lambda:self._tb_port.config(values=self._scan_ports())).pack(side=tk.LEFT,padx=(2,8),pady=8)
-        _lbl(b,"波特率",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(0,4),pady=14)
+        self._tb_port.pack(side=tk.LEFT,ipady=1,pady=14)
+        _btn(b,"刷新",lambda:self._tb_port.config(values=self._scan_ports())).pack(side=tk.LEFT,padx=(4,10),pady=12)
+        _lbl(b,"波特率",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(0,4),pady=20)
         self._tb_baud=_ent(b,str(self.config.get("BAUD_RATE",115200)),6)
-        self._tb_baud.pack(side=tk.LEFT,ipady=1,pady=10)
+        self._tb_baud.pack(side=tk.LEFT,ipady=2,pady=14)
         self._tb_cbtn=tk.Button(b,text="连接设备",font=F["b"],bg=C["accent"],fg="white",
                                 activebackground="#4338ca",activeforeground="white",
                                 relief=tk.FLAT,bd=0,padx=12,pady=4,cursor="hand2",command=self._conn_toggle)
-        self._tb_cbtn.pack(side=tk.LEFT,padx=10,pady=8)
+        self._tb_cbtn.pack(side=tk.LEFT,padx=12,pady=12)
         self._tb_dot=tk.Label(b,text="●",font=("Consolas",9),fg=C["muted"],bg=C["card"])
-        self._tb_dot.pack(side=tk.RIGHT,padx=(0,4),pady=12)
+        self._tb_dot.pack(side=tk.RIGHT,padx=(0,4),pady=19)
         self._tb_lbl=_lbl(b,"离线",F["s"],C["muted"])
-        self._tb_lbl.pack(side=tk.RIGHT,padx=(0,14),pady=13)
+        self._tb_lbl.pack(side=tk.RIGHT,padx=(0,16),pady=20)
 
     @staticmethod
     def _scan_ports():
@@ -156,47 +185,46 @@ class App:
         main=tk.Frame(self.root,bg=C["bg"]);main.pack(fill=tk.BOTH,expand=True)
 
         # ── 左侧: 设置选项 ──
-        self._left=tk.Frame(main,bg=C["card"],width=150)
+        self._left=tk.Frame(main,bg=C["card"],width=174,highlightbackground=C["border"],highlightthickness=0)
         self._left.pack(side=tk.LEFT,fill=tk.Y);self._left.pack_propagate(False)
         tk.Frame(self._left,bg=C["border"],height=1).pack(fill=tk.X,padx=10)
 
-        _lbl(self._left,"设置选项",F["h"],C["text"]).pack(anchor=tk.W,padx=14,pady=(14,8))
+        _lbl(self._left,"工作区",F["h"],C["text"]).pack(anchor=tk.W,padx=16,pady=(16,8))
         self._nav={}
         for mode,label in [("auto","自动调参"),("manual","手动配置"),("settings","LLM 设置")]:
             b=tk.Button(self._left,text=label,font=F["b"],fg=C["sub"],bg=C["card"],
-                        activebackground="#eef2ff",activeforeground=C["accent"],
-                        relief=tk.FLAT,bd=0,padx=14,pady=10,cursor="hand2",
+                        activebackground="#dff6f1",activeforeground=C["accent"],
+                        relief=tk.FLAT,bd=0,padx=16,pady=11,cursor="hand2",
                         anchor=tk.W,command=lambda m=mode:self._show_page(m))
             b.pack(fill=tk.X)
             self._nav[mode]=b
         tk.Frame(self._left,bg=C["border"],height=1).pack(fill=tk.X,padx=10,pady=8)
 
-        _lbl(self._left,"连接设置",F["s"],C["muted"]).pack(anchor=tk.W,padx=14,pady=(4,4))
-        _lbl(self._left,"端口号和波特率在顶部栏修改",F["s"],C["muted"],wraplength=120).pack(anchor=tk.W,padx=14)
+        _lbl(self._left,"连接设置",F["s"],C["muted"]).pack(anchor=tk.W,padx=16,pady=(4,4))
+        _lbl(self._left,"端口号和波特率在顶部栏修改",F["s"],C["muted"],wraplength=136,justify=tk.LEFT).pack(anchor=tk.W,padx=16)
 
         tk.Frame(self._left,bg=C["border"],height=1).pack(fill=tk.X,padx=10,pady=(16,4))
-        _lbl(self._left,"v0.2",F["s"],C["muted"]).pack(side=tk.BOTTOM,anchor=tk.W,padx=14,pady=10)
+        _lbl(self._left,"v0.3",F["s"],C["muted"]).pack(side=tk.BOTTOM,anchor=tk.W,padx=16,pady=10)
 
         # ── 中间: 设置内容 ──
         self._center=tk.Frame(main,bg=C["bg"])
 
         # ── 右侧: PID 曲线 ──
-        self._right=tk.Frame(main,bg=C["bg"],width=350)
+        self._right=tk.Frame(main,bg=C["bg"],width=380)
         self._right.pack(side=tk.RIGHT,fill=tk.BOTH);self._right.pack_propagate(False)
 
         # 曲线卡片
-        cf=_card(self._right);cf.pack(fill=tk.BOTH,expand=True,padx=(4,10),pady=(10,4))
-        _lbl(cf,"实时曲线",F["b"],C["sub"]).pack(anchor=tk.W)
+        cf=_card(self._right);cf.pack(fill=tk.BOTH,expand=True,padx=(6,12),pady=(12,6))
+        _section_label(cf,"实时曲线","速度 / 目标")
         self._curve=Curve(cf,280)
         self._curve.pack(fill=tk.BOTH,expand=True,pady=(4,0))
 
-        # 评分卡
-        sc=_card(self._right);sc.pack(fill=tk.X,padx=(4,10),pady=(0,4))
+        sc=_card(self._right);sc.pack(fill=tk.X,padx=(6,12),pady=(0,6))
         _lbl(sc,"稳定性评分",F["s"],C["sub"]).pack(anchor=tk.W)
         self._score_var=tk.StringVar(value="--- %")
-        tk.Label(sc,textvariable=self._score_var,font=("Consolas",30,"bold"),fg=C["accent"],bg=C["card"]).pack(anchor=tk.W)
+        tk.Label(sc,textvariable=self._score_var,font=F["xl"],fg=C["accent"],bg=C["card"]).pack(anchor=tk.W)
 
-        rc=_card(self._right);rc.pack(fill=tk.X,padx=(4,10),pady=(0,10))
+        rc=_card(self._right);rc.pack(fill=tk.X,padx=(6,12),pady=(0,12))
         _lbl(rc,"推荐 PID",F["s"],C["sub"]).pack(anchor=tk.W)
         self._rec_var=tk.StringVar(value="---")
         tk.Label(rc,textvariable=self._rec_var,font=F["big"],fg=C["green"],bg=C["card"]).pack(anchor=tk.W)
@@ -209,16 +237,16 @@ class App:
         self.mode=mode
         for m,b in self._nav.items():
             sel=(m==mode)
-            b.config(bg="#eef2ff" if sel else C["card"],fg=C["accent"] if sel else C["sub"])
+            b.config(bg="#dff6f1" if sel else C["card"],fg=C["accent"] if sel else C["sub"])
         for p in self._pages.values():p.pack_forget()
         self._center.pack(side=tk.LEFT,fill=tk.BOTH,expand=True)
-        self._pages[mode].pack(fill=tk.BOTH,expand=True,padx=(4,0),pady=(10,10))
+        self._pages[mode].pack(fill=tk.BOTH,expand=True,padx=(8,0),pady=(12,12))
 
     # ═══ 自动调参页面 ═══
     def _build_auto(self):
         pg=tk.Frame(self._center,bg=C["bg"]);self._pages["auto"]=pg
 
-        bar=_card(pg);bar.pack(fill=tk.X,pady=(0,8))
+        bar=_card(pg);bar.pack(fill=tk.X,pady=(0,10))
         r=tk.Frame(bar,bg=C["card"]);r.pack(fill=tk.X)
         # 模式选择
         self._auto_mode=tk.StringVar(value="sim")
@@ -242,20 +270,18 @@ class App:
         self._auto_mode_lbl.pack(side=tk.RIGHT,padx=(0,10))
 
         # PID 卡片
-        cd=tk.Frame(pg,bg=C["bg"]);cd.pack(fill=tk.X,pady=(0,8))
+        cd=tk.Frame(pg,bg=C["bg"]);cd.pack(fill=tk.X,pady=(0,10))
         self._av={}
         for lab,key,clr in [("Kp 比例","p",C["blue"]),("Ki 积分","i",C["red"]),("Kd 微分","d",C["amber"])]:
-            c=_card(tk.Frame(cd,bg=C["bg"]));c.pack(side=tk.LEFT,padx=(0,6),fill=tk.X,expand=True)
+            c=_card(cd);c.pack(side=tk.LEFT,padx=(0,8),fill=tk.X,expand=True)
             _lbl(c,lab,F["s"],C["sub"]).pack(anchor=tk.W)
             v=tk.StringVar(value="---")
             tk.Label(c,textvariable=v,font=F["big"],fg=clr,bg=C["card"]).pack(anchor=tk.W,pady=(1,0))
             self._av[key]=v
 
-        # 决策日志
         lf=_card(pg);lf.pack(fill=tk.BOTH,expand=True)
-        _lbl(lf,"决策日志",F["b"],C["sub"]).pack(anchor=tk.W)
-        self._auto_log=scrolledtext.ScrolledText(lf,font=F["m"],bg=C["card"],fg=C["text"],
-                                                   relief=tk.FLAT,padx=10,pady=6)
+        _section_label(lf,"决策日志","批量刷新，避免串口采样卡顿")
+        self._auto_log=_log_widget(lf)
         self._auto_log.pack(fill=tk.BOTH,expand=True,pady=(4,0))
 
     def _mode_changed(self,mode):
@@ -394,7 +420,7 @@ class App:
     def _build_manual(self):
         pg=tk.Frame(self._center,bg=C["bg"]);self._pages["manual"]=pg
 
-        bar=_card(pg);bar.pack(fill=tk.X,pady=(0,8))
+        bar=_card(pg);bar.pack(fill=tk.X,pady=(0,10))
         r=tk.Frame(bar,bg=C["card"]);r.pack(fill=tk.X)
         for lab,attr,defv in [("Kp","_mp",3.0),("Ki","_mi",1.0),("Kd","_md",0.0)]:
             g=tk.Frame(r,bg=C["card"]);g.pack(side=tk.LEFT,padx=(0,6))
@@ -413,9 +439,8 @@ class App:
 
         # 日志
         lf=_card(pg);lf.pack(fill=tk.BOTH,expand=True)
-        _lbl(lf,"测试日志",F["b"],C["sub"]).pack(anchor=tk.W)
-        self._m_log=scrolledtext.ScrolledText(lf,font=F["m"],bg=C["card"],fg=C["text"],
-                                                relief=tk.FLAT,padx=10,pady=6)
+        _section_label(lf,"测试日志","手动 PID 测试")
+        self._m_log=_log_widget(lf)
         self._m_log.pack(fill=tk.BOTH,expand=True,pady=(4,0))
 
     def _m_clear(self):self._curve.clear();self._score_var.set("--- %");self._rec_var.set("---");self._m_log.delete(1.0,tk.END)
@@ -499,7 +524,7 @@ class App:
     def _build_settings(self):
         pg=tk.Frame(self._center,bg=C["bg"]);self._pages["settings"]=pg
         c=_card(pg);c.pack(fill=tk.BOTH,expand=True)
-        _lbl(c,"LLM 配置",F["h"]).pack(anchor=tk.W,pady=(0,10))
+        _section_label(c,"LLM 配置","可选，用于自动推荐参数")
 
         # 快捷模板
         r0=tk.Frame(c,bg=C["card"]);r0.pack(fill=tk.X,pady=(0,8))
