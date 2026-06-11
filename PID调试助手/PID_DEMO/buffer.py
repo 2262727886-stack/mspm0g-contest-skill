@@ -13,6 +13,7 @@ class SpeedBuffer:
         if len(self._data) < 10: return {"status":"INSUFFICIENT_DATA","avg_error":0,"overshoot":0,"steady_state_error":0,"oscillation_index":0}
         errs = [max(abs(s.get("speed_L",0)-s.get("target_L",0)), abs(s.get("speed_R",0)-s.get("target_R",0))) for s in self._data]
         avg = sum(errs)/len(errs)
+        avg_speed = sum((s.get("speed_L",0)+s.get("speed_R",0))/2 for s in self._data)/len(self._data)
         mx = max(max(abs(s.get("speed_L",0)),abs(s.get("speed_R",0))) for s in self._data)
         tgt = max(abs(self._data[0].get("target_L",0)),abs(self._data[0].get("target_R",0))) or 1
         overshoot = max(0,(mx/tgt-1)*100)
@@ -20,7 +21,7 @@ class SpeedBuffer:
         zc = sum(1 for i in range(1,len(errs)) if (errs[i]-avg)*(errs[i-1]-avg)<0)
         osc = zc/max(1,len(errs))*100
         st = "OSCILLATING" if osc>15 else ("OVERSHOOTING" if overshoot>15 else ("SLOW_RESPONSE" if avg>10 else "STABLE"))
-        return {"status":st,"avg_error":round(avg,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc,1),"sample_count":len(self._data)}
+        return {"status":st,"avg_error":round(avg,2),"avg_speed":round(avg_speed,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc,1),"sample_count":len(self._data)}
 
     def to_prompt_data(self) -> str:
         if len(self._data) < 5: return "# Insufficient data"

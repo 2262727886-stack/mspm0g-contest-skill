@@ -369,7 +369,8 @@ class App:
                     if sample_idx % 4 == 0:
                         self.q.put(("curve",s.get("speed_L",0)))
             m=buf.calculate_metrics()
-            cur_v=tgt-m['avg_error']
+            last_s=buf._data[-1] if len(buf)>0 else {}
+            cur_v=(last_s.get("speed_L",0)+last_s.get("speed_R",0))/2
             self.q.put(("curve",cur_v))
             self._auto_log_msg(f"  预热 P={test_kp:.1f}: speed={cur_v:.0f} tgt={tgt} err={m['avg_error']:.1f} [{m['status']}]")
             if m["avg_error"]<best_err:best_err=m["avg_error"];best_p={"p":test_kp,"i":0.0,"d":0.0}
@@ -397,10 +398,10 @@ class App:
                 on_sample=push_curve_throttled,
                 on_round_complete=lambda r,pid,m,res:(
                     self.q.put(("pid",pid)),
-                    self.q.put(("curve",tgt-m['avg_error'])),
+                    self.q.put(("curve",m.get("avg_speed",0))),
                     self.q.put(("score",f"{max(0,100-m['avg_error']*2-m['overshoot']*0.3):.0f}%")),
                     self.q.put(("rec",f"P={pid['p']:.3f} I={pid['i']:.3f}")),
-                    self._auto_log_msg(f"R{r}: speed={tgt-m['avg_error']:.0f} tgt={tgt} err={m['avg_error']:.1f} [{m['status']}] P={pid['p']:.3f} I={pid['i']:.3f}"),
+                    self._auto_log_msg(f"R{r}: speed={m.get('avg_speed',0):.0f} tgt={tgt} err={m['avg_error']:.1f} [{m['status']}] P={pid['p']:.3f} I={pid['i']:.3f}"),
                     (res and res.get("analysis_summary","")) and self._auto_log_msg(f"  LLM: {res.get('analysis_summary','')}")
                 ),
                 abort_check=lambda:self._stop_event.is_set()

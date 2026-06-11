@@ -6,11 +6,11 @@
 #define CMD_BUF_SIZE  64
 
 PidTunerState g_pid_tuner = {
-    3.0f,
-    1.0f,
+    2.0f,
     0.0f,
-    60,
-    60,
+    0.0f,
+    20,
+    20,
     false
 };
 
@@ -75,11 +75,11 @@ static void parse_tuner_cmd(const char *cmd)
             (int)g_pid_tuner.target_right);
         uart_send_text(resp);
     } else if (strncmp(cmd, "RESET", 5) == 0) {
-        g_pid_tuner.kp = 3.0f;
-        g_pid_tuner.ki = 1.0f;
+        g_pid_tuner.kp = 2.0f;
+        g_pid_tuner.ki = 0.0f;
         g_pid_tuner.kd = 0.0f;
-        g_pid_tuner.target_left = 60;
-        g_pid_tuner.target_right = 60;
+        g_pid_tuner.target_left = 20;
+        g_pid_tuner.target_right = 20;
         g_pid_tuner.reset_request = true;
         uart_send_text("OK RESET\r\n");
     } else if (strncmp(cmd, "STOP", 4) == 0) {

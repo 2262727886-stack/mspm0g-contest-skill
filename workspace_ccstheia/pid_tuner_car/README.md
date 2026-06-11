@@ -22,8 +22,8 @@ MSPM0G3507 小车 PID 调试工程：PA25 控制启停，PC 端 PID 调试助手
 ## PC -> MCU 命令
 
 ```text
-SET P:3.0000 I:1.0000 D:0.0000
-TARGET L:60 R:60
+SET P:2.0000 I:0.0000 D:0.0000
+TARGET L:20 R:20
 STATUS
 RESET
 STOP
@@ -40,13 +40,13 @@ timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki
 示例：
 
 ```text
-1200,58,59,60,60,780,790,3.000,1.000
+1200,18,19,20,20,620,630,2.000,0.000
 ```
 
 ## 调试建议
 
 - 首次测试必须架空车轮。
-- 先发送 `TARGET L:30 R:30` 小目标速度，再按 PA25 启动。
+- 先发送 `TARGET L:20 R:20` 和 `SET P:2.0000 I:0.0000 D:0.0000`，确认速度能被 P-only 拉住，再逐步加 I。
+- 本工程默认只做正向速度闭环，PID 输出不会反向倒车；如果速度过冲，先降低 P 或目标速度，不要先加 I。
 - 如果车轮方向反了，优先检查 TB6612 A/B 通道和 `motor_left_set()` / `motor_right_set()` 的方向极性。
 - 如果串口助手收不到 CSV，确认 PA10/PA11 没有被 I2C1/MPU6050 占用。
-
