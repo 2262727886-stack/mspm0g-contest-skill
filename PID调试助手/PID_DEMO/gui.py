@@ -425,7 +425,7 @@ class App:
             last_s=buf._data[-1] if len(buf)>0 else {}
             cur_v=(last_s.get("speed_L",0)+last_s.get("speed_R",0))/2
             self.q.put(("curve",cur_v))
-            self._auto_log_msg(f"  预热 P={test_kp:.1f}: speed={cur_v:.0f} tgt={m.get('avg_target',tgt):.0f} err={m['avg_error']:.1f} [{m['status']}]")
+            self._auto_log_msg(f"  预热 P={test_kp:.1f}: speed={cur_v:.0f} tgt={m.get('avg_target',tgt):.0f} err={m['avg_error']:.1f} [{m.get("status_cn", m["status"])}]")
             if m["avg_error"]<best_err:best_err=m["avg_error"];best_p={"p":test_kp,"i":0.0,"d":0.0}
         # 最佳 P 加初始 I
         best_p["i"]=best_p["p"]*0.3
@@ -454,7 +454,7 @@ class App:
                     self.q.put(("curve",m.get("avg_speed",0))),
                     self.q.put(("score",f"{max(0,100-m['avg_error']*2-m['overshoot']*0.3):.0f}%")),
                     self.q.put(("rec",f"P={pid['p']:.3f} I={pid['i']:.3f}")),
-                    self._auto_log_msg(f"R{r}: speed={m.get('avg_speed',0):.0f} tgt={m.get('avg_target',tgt):.0f} err={m['avg_error']:.1f} [{m['status']}] P={pid['p']:.3f} I={pid['i']:.3f}"),
+                    self._auto_log_msg(f"R{r}: speed={m.get('avg_speed',0):.0f} tgt={m.get('avg_target',tgt):.0f} err={m['avg_error']:.1f} [{m.get("status_cn", m["status"])}] P={pid['p']:.3f} I={pid['i']:.3f}"),
                     (res and res.get("analysis_summary","")) and self._auto_log_msg(f"  LLM: {res.get('analysis_summary','')}")
                 ),
                 abort_check=lambda:self._stop_event.is_set()
@@ -475,21 +475,38 @@ class App:
         pg=tk.Frame(self._center,bg=C["bg"]);self._pages["manual"]=pg
 
         bar=_card(pg);bar.pack(fill=tk.X,pady=(0,10))
-        r=tk.Frame(bar,bg=C["card"]);r.pack(fill=tk.X)
+
+        # 第一行：模式选择 + 参数输入
+        r1=tk.Frame(bar,bg=C["card"]);r1.pack(fill=tk.X,pady=(0,6))
+
+        # 模式选择
+        self._manual_mode=tk.StringVar(value="sim")
+        _lbl(r1,"模式:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
+        for mode,label in [("sim","仿真"),("hw","硬件")]:
+            tk.Radiobutton(r1,text=label,variable=self._manual_mode,value=mode,font=F["b"],
+                          bg=C["card"],fg=C["text"],activebackground=C["card"],
+                          selectcolor=C["card"],cursor="hand2").pack(side=tk.LEFT,padx=(0,8))
+        tk.Frame(r1,bg=C["border"],width=1).pack(side=tk.LEFT,fill=tk.Y,padx=6)
+
+        # 参数输入
         for lab,attr,defv in [("Kp","_mp",3.0),("Ki","_mi",1.0),("Kd","_md",0.0)]:
-            g=tk.Frame(r,bg=C["card"]);g.pack(side=tk.LEFT,padx=(0,6))
+            g=tk.Frame(r1,bg=C["card"]);g.pack(side=tk.LEFT,padx=(0,6))
             _lbl(g,lab,F["s"],C["sub"]).pack(anchor=tk.W)
             e=_ent(g,defv,6);setattr(self,attr,e)
-        _lbl(r,"目标:",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(8,2))
-        self._mtgt=_ent(r,60,4);self._mtgt.pack(side=tk.LEFT,padx=(0,8))
-        _lbl(r,"次数:",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(4,2))
-        self._mtests=_ent(r,3,3);self._mtests.pack(side=tk.LEFT,padx=(0,8))
-        _lbl(r,"秒/次:",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(2,2))
-        self._msec=_ent(r,5,3);self._msec.pack(side=tk.LEFT)
-        _btn(r,"发送PID",self._m_send,pri=True).pack(side=tk.RIGHT,padx=(4,0))
-        _btn(r,"清空曲线",self._m_clear).pack(side=tk.RIGHT,padx=4)
-        _btn(r,"模型评估",self._m_model).pack(side=tk.RIGHT,padx=4)
-        _btn(r,"开始测试",self._m_start,pri=True).pack(side=tk.RIGHT,padx=4)
+        _lbl(r1,"目标:",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(8,2))
+        self._mtgt=_ent(r1,60,4);self._mtgt.pack(side=tk.LEFT,padx=(0,8))
+        _lbl(r1,"次数:",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(4,2))
+        self._mtests=_ent(r1,3,3);self._mtests.pack(side=tk.LEFT,padx=(0,8))
+        _lbl(r1,"秒/次:",F["s"],C["sub"]).pack(side=tk.LEFT,padx=(2,2))
+        self._msec=_ent(r1,5,3);self._msec.pack(side=tk.LEFT)
+
+        # 第二行：按钮
+        r2=tk.Frame(bar,bg=C["card"]);r2.pack(fill=tk.X)
+        _btn(r2,"📡 仅观察",self._m_observe,pri=False).pack(side=tk.LEFT,padx=(0,6))
+        _btn(r2,"📤 发送PID",self._m_send,pri=True).pack(side=tk.LEFT,padx=(0,6))
+        _btn(r2,"▶ 开始测试",self._m_start,pri=True).pack(side=tk.LEFT,padx=(0,6))
+        _btn(r2,"📊 模型评估",self._m_model).pack(side=tk.LEFT,padx=(0,6))
+        _btn(r2,"🗑 清空曲线",self._m_clear).pack(side=tk.LEFT,padx=(0,6))
 
         # 日志
         lf=_card(pg);lf.pack(fill=tk.BOTH,expand=True)
@@ -497,16 +514,114 @@ class App:
         self._m_log=_log_widget(lf)
         self._m_log.pack(fill=tk.BOTH,expand=True,pady=(4,0))
 
+    def _m_observe(self):
+        """仅观察模式：只接收串口数据并显示波形，不发送任何命令"""
+        if self.running:
+            self._stop_event.set()
+            return
+        if not self._conn:
+            self._m_log_msg("未连接设备")
+            return
+        self._stop_event.clear()
+        self.running = True
+        self._curve.clear()
+        self._m_log.delete(1.0, tk.END)
+        self._m_log_msg("📡 仅观察模式：只显示波形，不发送命令")
+        self._m_log_msg("   点击「仅观察」按钮停止")
+        threading.Thread(target=self._m_observe_run, daemon=True).start()
+
+    def _m_observe_run(self):
+        """仅观察模式的运行线程"""
+        from PID_DEMO.bridge import SerialBridge
+
+        # 获取串口配置
+        port=self._tb_port.get().strip() or "AUTO"
+        try: baud=int(self._tb_baud.get())
+        except: baud=115200
+
+        # 先断开顶部工具栏的连接（如果已连接）
+        was_connected = self._conn
+        if was_connected and self._bridge:
+            self._bridge.disconnect()
+            self._conn = False
+            self._m_log_msg("[观察] 已断开之前的连接")
+
+        # 创建新的 bridge 实例
+        bridge=SerialBridge(port=port,baud=baud)
+        if not bridge.connect():
+            self._m_log_msg("[错误] 无法打开串口!")
+            # 尝试恢复之前的连接
+            if was_connected:
+                self._conn_toggle()
+            self.running=False
+            return
+
+        self._m_log_msg(f"[观察] 已连接 {port} @ {baud}")
+        self._m_log_msg("[观察] 开始接收数据...")
+        bridge.flush()
+
+        count = 0
+        while not self._stop_event.is_set():
+            try:
+                # 从串口读取数据
+                sample = bridge.read_sample()
+                if sample:
+                    speed_L = sample.get("speed_L", 0)
+                    speed_R = sample.get("speed_R", 0)
+                    target_L = sample.get("target_L", 0)
+                    pwm_L = sample.get("pwm_L", 0)
+
+                    # 通过队列更新曲线
+                    self.q.put(("m_curve", speed_L))
+                    count += 1
+
+                    # 每 50 个点记录一次
+                    if count % 50 == 0:
+                        self._m_log_msg(f"  #{count}: speed={speed_L} target={target_L} pwm={pwm_L}")
+                else:
+                    time.sleep(0.01)
+            except Exception as e:
+                self._m_log_msg(f"错误: {e}")
+                time.sleep(0.1)
+
+        # 断开连接并恢复之前的连接
+        bridge.disconnect()
+        if was_connected:
+            self._conn_toggle()
+            self._m_log_msg("[观察] 已恢复之前的连接")
+
+        self._m_log_msg(f"[观察] 结束，共接收 {count} 个数据点")
+        self.running = False
+
     def _m_clear(self):self._curve.clear();self._score_var.set("--- %");self._rec_var.set("---");self._m_log.delete(1.0,tk.END)
 
     def _m_send(self):
-        if not self._conn:self._m_log_msg("未连接设备");return
-        try:p=float(self._mp.get());i=float(self._mi.get());d=float(self._md.get())
-        except:self._m_log_msg("PID 数值无效");return
-        self._bridge.set_pid(p,i,d)
-        try:t=int(self._mtgt.get());self._bridge.set_target(t,t)
-        except:pass
-        self._m_log_msg(f"已发送: P={p:.3f} I={i:.3f} D={d:.3f}")
+        """发送 PID 参数到设备"""
+        mode = self._manual_mode.get()
+
+        if mode == "hw":
+            # 硬件模式：需要连接设备
+            if not self._conn:
+                self._m_log_msg("未连接设备，请先连接串口")
+                return
+            try:
+                p=float(self._mp.get());i=float(self._mi.get());d=float(self._md.get())
+            except:
+                self._m_log_msg("PID 数值无效");return
+            self._bridge.set_pid(p,i,d)
+            try:
+                t=int(self._mtgt.get());self._bridge.set_target(t,t)
+            except:
+                pass
+            self._m_log_msg(f"[硬件] 已发送: P={p:.3f} I={i:.3f} D={d:.3f}")
+        else:
+            # 仿真模式：只更新参数
+            try:
+                p=float(self._mp.get());i=float(self._mi.get());d=float(self._md.get())
+            except:
+                self._m_log_msg("PID 数值无效");return
+            self._m_log_msg(f"[仿真] PID 已设置: P={p:.3f} I={i:.3f} D={d:.3f}")
+
         self.pid={"p":p,"i":i,"d":d}
 
     def _m_start(self):
@@ -517,10 +632,165 @@ class App:
         try:tests=int(self._mtests.get());sec=int(self._msec.get());tgt=int(self._mtgt.get())
         except:tests=3;sec=5;tgt=60
         self._curve.clear();self._m_log.delete(1.0,tk.END)
-        self._m_log_msg(f"开始测试: P={p:.3f} I={i:.3f} D={d:.3f}")
-        threading.Thread(target=self._m_run,args=(p,i,d,tests,sec,tgt),daemon=True).start()
 
-    def _m_run(self,p,i,d,tests,sec,tgt):
+        mode = self._manual_mode.get()
+        self._m_log_msg(f"开始测试: P={p:.3f} I={i:.3f} D={d:.3f} [模式: {'硬件' if mode=='hw' else '仿真'}]")
+
+        if mode == "hw":
+            # 硬件模式
+            if not self._conn:
+                self._m_log_msg("未连接设备，请先连接串口")
+                self.running = False
+                return
+            threading.Thread(target=self._m_run_hw,args=(p,i,d,tests,sec,tgt),daemon=True).start()
+        else:
+            # 仿真模式
+            threading.Thread(target=self._m_run_sim,args=(p,i,d,tests,sec,tgt),daemon=True).start()
+
+    def _m_run_hw(self,p,i,d,tests,sec,tgt):
+        """硬件模式测试"""
+        from PID_DEMO.bridge import SerialBridge
+
+        self._m_log_msg("[硬件] 开始测试...")
+
+        # 获取串口配置
+        port=self._tb_port.get().strip() or "AUTO"
+        try: baud=int(self._tb_baud.get())
+        except: baud=115200
+
+        self._m_log_msg(f"[硬件] 串口: {port} @ {baud}")
+
+        # 先断开顶部工具栏的连接（如果已连接）
+        was_connected = self._conn
+        if was_connected and self._bridge:
+            self._m_log_msg("[硬件] 断开之前的连接...")
+            try:
+                self._bridge.disconnect()
+            except:
+                pass
+            self._conn = False
+            time.sleep(0.5)  # 等待串口释放
+
+        # 创建新的 bridge 实例
+        self._m_log_msg("[硬件] 创建新连接...")
+        bridge=SerialBridge(port=port,baud=baud)
+
+        try:
+            if not bridge.connect():
+                self._m_log_msg("[错误] 无法打开串口!")
+                self.running=False
+                return
+        except Exception as e:
+            self._m_log_msg(f"[错误] 连接失败: {e}")
+            self.running=False
+            return
+
+        self._m_log_msg(f"[硬件] 已连接，发送 PID: P={p:.3f} I={i:.3f} D={d:.3f}")
+
+        # 发送 PID 参数
+        try:
+            bridge.set_pid(p,i,d)
+            time.sleep(0.2)
+            bridge.flush()  # 清空 MCU 响应
+        except Exception as e:
+            self._m_log_msg(f"[错误] 发送 PID 失败: {e}")
+            bridge.disconnect()
+            self.running=False
+            return
+
+        # 设置目标（使用 checked 版本，等待 MCU 确认）
+        self._m_log_msg(f"[硬件] 设置目标: {tgt}")
+        try:
+            if not bridge.set_target_checked(tgt,tgt,timeout_s=3.0):
+                self._m_log_msg("[警告] 未收到目标确认，继续...")
+            bridge.flush()  # 清空 MCU 响应
+        except Exception as e:
+            self._m_log_msg(f"[错误] 设置目标失败: {e}")
+            bridge.disconnect()
+            self.running=False
+            return
+
+        # 等待 MCU 开始发送数据
+        self._m_log_msg("[硬件] 等待数据...")
+        samples = bridge.read_samples(5,timeout_s=6.0)
+
+        if len(samples) < 2:
+            self._m_log_msg(f"[错误] 只收到 {len(samples)} 个数据点!")
+            self._m_log_msg("[提示] 请检查 MCU 是否在发送 CSV 数据")
+            bridge.disconnect()
+            self.running = False
+            return
+
+        # 检查是否有速度数据
+        has_speed = any(s.get("speed_L", 0) > 0 for s in samples)
+        if not has_speed:
+            self._m_log_msg("[警告] 速度为 0!")
+            self._m_log_msg("[提示] 请按 PA25 启动 MCU，然后重新测试")
+            bridge.disconnect()
+            self.running = False
+            return
+
+        self._m_log_msg(f"[硬件] 收到 {len(samples)} 点数据，开始测试")
+
+        all_m=[]
+        for ti in range(tests):
+            if self._stop_event.is_set():self._m_log_msg("[已停止]");break
+            self._m_log_msg(f"  第{ti+1}次测试 ({sec}秒)...")
+
+            from PID_DEMO.buffer import SpeedBuffer
+            buf=SpeedBuffer(200)
+            start_time=time.time()
+            count=0
+
+            # 使用 read_samples 批量读取
+            target_samples = int(sec * 50)  # 假设 50Hz 采样率
+            samples = []
+            while len(samples) < target_samples and time.time()-start_time < sec+2:
+                if self._stop_event.is_set():break
+                batch = bridge.read_samples(min(10, target_samples-len(samples)), timeout_s=0.5)
+                samples.extend(batch)
+                if batch:
+                    for s in batch:
+                        speed=s.get("speed_L",0)
+                        self.q.put(("m_curve",speed))
+                    count += len(batch)
+
+            if count>0:
+                # 计算指标
+                from PID_DEMO.buffer import SpeedBuffer as SB
+                calc_buf = SB(200)
+                for s in samples:
+                    calc_buf.add(s)
+                m = calc_buf.calculate_metrics()
+                all_m.append(m)
+                self._m_log_msg(f"  第{ti+1}次: {count}点 速度={m.get('avg_speed',0):.1f} 误差={m['avg_error']:.1f}")
+            else:
+                self._m_log_msg(f"  第{ti+1}次: 无数据!")
+
+        # 断开连接
+        bridge.disconnect()
+
+        if all_m:
+            avg_err=sum(x["avg_error"] for x in all_m)/len(all_m)
+            avg_over=sum(x.get("overshoot",0) for x in all_m)/len(all_m)
+            score=max(0,100-avg_err*3-avg_over*0.5)
+            self.q.put(("score",f"{score:.1f} %"))
+            rec_p=p*(0.7+0.3*score/100);rec_i=i*(0.5+0.5*score/100) if score<70 else i
+            self.q.put(("rec",f"P={rec_p:.3f}  I={rec_i:.3f}"))
+            self._m_log_msg(f"[硬件] 稳定性: {score:.1f}% | 推荐: P={rec_p:.3f} I={rec_i:.3f}")
+        else:
+            self._m_log_msg("[硬件] 未获取到任何有效数据!")
+
+        # 断开连接并恢复之前的连接
+        bridge.disconnect()
+        if was_connected:
+            self._conn_toggle()
+            self._m_log_msg("[硬件] 已恢复之前的连接")
+
+        self.running=False
+
+    def _m_run_sim(self,p,i,d,tests,sec,tgt):
+        """仿真模式测试"""
         from PID_DEMO.car_model import CarSimulator
         from PID_DEMO.buffer import SpeedBuffer
         all_m=[]
@@ -533,14 +803,14 @@ class App:
                 self.q.put(("m_curve",s.get("speed_L",0)))
                 time.sleep(0.008)
             m=buf.calculate_metrics();all_m.append(m)
-            self._m_log_msg(f"  第{ti+1}次: 误差={m['avg_error']:.1f} 超调={m['overshoot']:.1f}% [{m['status']}]")
+            self._m_log_msg(f"  第{ti+1}次: 误差={m['avg_error']:.1f} 超调={m['overshoot']:.1f}% [{m.get("status_cn", m["status"])}]")
         avg_err=sum(x["avg_error"] for x in all_m)/len(all_m)
         avg_over=sum(x["overshoot"] for x in all_m)/len(all_m)
         score=max(0,100-avg_err*3-avg_over*0.5)
         self.q.put(("score",f"{score:.1f} %"))
         rec_p=p*(0.7+0.3*score/100);rec_i=i*(0.5+0.5*score/100) if score<70 else i
         self.q.put(("rec",f"P={rec_p:.3f}  I={rec_i:.3f}"))
-        self._m_log_msg(f"稳定性: {score:.1f}% | 推荐: P={rec_p:.3f} I={rec_i:.3f}")
+        self._m_log_msg(f"[仿真] 稳定性: {score:.1f}% | 推荐: P={rec_p:.3f} I={rec_i:.3f}")
         self.running=False
 
     def _m_model(self):
@@ -566,7 +836,7 @@ class App:
         else:
             rec=f"P={p*0.9:.3f}  I={i*1.1:.3f}"
             msg=f"LLM 不可用 (检查 API Key)\n\n规则推荐: {rec}"
-        self._m_log_msg(f"评估完成: 误差={m['avg_error']:.1f} [{m['status']}]")
+        self._m_log_msg(f"评估完成: 误差={m['avg_error']:.1f} [{m.get("status_cn", m["status"])}]")
         self._rec_var.set(rec);self.q.put(("rec",rec))
         score=max(0,100-m["avg_error"]*3-m["overshoot"]*0.5)
         self.q.put(("score",f"{score:.1f} %"))

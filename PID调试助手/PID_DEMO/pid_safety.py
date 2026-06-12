@@ -24,11 +24,24 @@ def apply_pid_guardrails(current: Dict, candidate: Dict, limits: Optional[Dict] 
 def build_fallback_suggestion(current: Dict, metrics: Dict) -> Dict:
     p, i, d = current.get("p", 3.0), current.get("i", 1.0), current.get("d", 0.0)
     status = metrics.get("status", "STABLE")
-    if status == "OVERSPEED": p *= 0.55; i *= 0.25; d = 0.0
-    elif status == "OSCILLATING": p *= 0.7; i *= 0.6; d = 0.5
-    elif status == "OVERSHOOTING": p *= 0.8; i *= 0.5
-    elif status == "SLOW_RESPONSE": p *= 1.3; i = min(i * 1.5, 1.0) if i < 1.0 else i
-    else: p *= 0.95
+    if status == "OVERSPEED":
+        p *= 0.55; i *= 0.25; d = 0.0
+    elif status == "MOTOR_LIMIT":
+        # 电机能力不足：增大 P/I 尝试提高响应，但有上限
+        p = min(p * 1.5, 10.0)
+        i = min(i * 1.3, 3.0)
+        d = 0.0
+    elif status == "OSCILLATING":
+        # 真正的振荡：降低 P/I
+        p *= 0.7; i *= 0.6; d = 0.5
+    elif status == "OVERSHOOTING":
+        p *= 0.8; i *= 0.5
+    elif status == "SLOW_RESPONSE":
+        # 速度不足：增大 P/I
+        p *= 1.3
+        i = min(i * 1.5, 2.0) if i < 1.0 else i * 1.2
+    else:
+        p *= 0.95
     return {"p": max(0.1, round(p, 3)), "i": max(0.0, round(i, 3)), "d": max(0.0, round(d, 3))}
 
 def should_rollback(current: Dict, best: Dict) -> bool:

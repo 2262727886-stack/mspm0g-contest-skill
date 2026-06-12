@@ -48,7 +48,11 @@ class SerialBridge:
             line = self.read_line()
             if not line: return None
             parts = line.split(",")
-            if len(parts) < 8: return None
+            if len(parts) < 8:
+                # 数据格式不对，记录最后几行用于调试
+                self.last_probe_lines.append(line)
+                self.last_probe_lines = self.last_probe_lines[-5:]
+                return None
             try: vals = [float(p) for p in parts[:8]]
             except ValueError: return None
             return {"timestamp_ms":vals[0],"speed_L":vals[1],"speed_R":vals[2],
@@ -59,10 +63,17 @@ class SerialBridge:
 
     def read_line(self) -> Optional[str]:
         if not (self._ser and self._ser.is_open): return None
-        raw = self._ser.readline()
-        if not raw: return None
-        line = raw.decode("utf-8", errors="replace").strip().replace("\r","")
-        return line or None
+        try:
+            # 使用更短的超时
+            old_timeout = self._ser.timeout
+            self._ser.timeout = 0.05  # 50ms 超时
+            raw = self._ser.readline()
+            self._ser.timeout = old_timeout
+            if not raw: return None
+            line = raw.decode("utf-8", errors="replace").strip().replace("\r","")
+            return line or None
+        except Exception as e:
+            return None
 
     @staticmethod
     def _line_has_target(line: str, left: int, right: int) -> bool:
