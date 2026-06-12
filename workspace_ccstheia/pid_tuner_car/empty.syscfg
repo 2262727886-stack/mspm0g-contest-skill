@@ -1,83 +1,107 @@
 /**
- * MSPM0G3507 PID Tuner Car
+ * MSPM0G3507 PID 调试助手工程
  *
- * PA25: start/stop key, active low
- * UART0: PA10=TX, PA11=RX, 115200 8N1 for PC PID tuner
- * TB6612FNG:
- *   A channel = right wheel: PWMA=PB15/TIMG8_C0, AIN1=PA13, AIN2=PA12
- *   B channel = left wheel:  PWMB=PB16/TIMG8_C1, BIN1=PB0,  BIN2=PB1
- * Encoders:
- *   Right A phase = PA15 edge interrupt
- *   Left  A phase = PA17 edge interrupt
+ * I2C0 OLED:   PA28=SDA, PA31=SCL (0x3C, 400kHz)
+ * UART0 调试:  PA10=TX, PA11=RX (115200)
+ * PWM Motor:   TIMG8, PB15=C0(右轮), PB16=C1(左轮), 20kHz
+ * LED:         PB22
+ * START 按键:  PA25 (对地, 启动/停止)
+ * TB6612 方向: PA13=AIN1, PA12=AIN2, PB0=BIN1, PB1=BIN2
  */
 //@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
 //@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
 
 const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1  = GPIO.addInstance();
+const GPIO2  = GPIO.addInstance();
+const GPIO3  = GPIO.addInstance();
+const GPIO4  = GPIO.addInstance();
+const GPIO5  = GPIO.addInstance();
 const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
-const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const I2C    = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C1   = I2C.addInstance();
 const PWM    = scripting.addModule("/ti/driverlib/PWM", {}, false);
+const PWM1   = PWM.addInstance();
+const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1  = UART.addInstance();
 const Board  = scripting.addModule("/ti/driverlib/Board", {}, false);
 
-const GPIO_LED   = GPIO.addInstance();
-const GPIO_START = GPIO.addInstance();
-const GPIO_DIR_A = GPIO.addInstance();
-const GPIO_DIR_B = GPIO.addInstance();
-const DEBUG_UART = UART.addInstance();
-const MOTOR_PWM  = PWM.addInstance();
+/* LED */
+GPIO1.$name                         = "GPIO";
+GPIO1.associatedPins[0].$name       = "LED";
+GPIO1.associatedPins[0].pin.$assign = "PB22";
+
+/* 启动按键 */
+GPIO2.$name                         = "START";
+GPIO2.associatedPins[0].$name       = "BTN";
+GPIO2.associatedPins[0].pin.$assign = "PA25";
+GPIO2.associatedPins[0].direction   = "INPUT";
+
+/* 左轮方向 */
+GPIO3.$name                         = "DIR_L";
+GPIO3.associatedPins.create(2);
+GPIO3.associatedPins[0].$name       = "BIN1";
+GPIO3.associatedPins[0].pin.$assign = "PB0";
+GPIO3.associatedPins[1].$name       = "BIN2";
+GPIO3.associatedPins[1].pin.$assign = "PB1";
+
+/* 右轮方向 */
+GPIO4.$name                         = "DIR_R";
+GPIO4.associatedPins.create(2);
+GPIO4.associatedPins[0].$name       = "AIN1";
+GPIO4.associatedPins[0].pin.$assign = "PA13";
+GPIO4.associatedPins[1].$name       = "AIN2";
+GPIO4.associatedPins[1].pin.$assign = "PA12";
+
+/* 编码器 */
+GPIO5.$name                         = "ENC";
+GPIO5.associatedPins.create(2);
+GPIO5.associatedPins[0].$name       = "ENC_R_A";
+GPIO5.associatedPins[0].pin.$assign = "PA15";
+GPIO5.associatedPins[0].direction   = "INPUT";
+GPIO5.associatedPins[1].$name       = "ENC_L_A";
+GPIO5.associatedPins[1].pin.$assign = "PA17";
+GPIO5.associatedPins[1].direction   = "INPUT";
 
 SYSCTL.forceDefaultClkConfig = true;
 
-GPIO_LED.$name                         = "GPIO";
-GPIO_LED.associatedPins[0].$name       = "LED";
-GPIO_LED.associatedPins[0].pin.$assign = "PB22";
+/* I2C OLED */
+I2C1.$name                     = "I2C_OLED";
+I2C1.peripheral.sdaPin.$assign = "PA28";
+I2C1.peripheral.sclPin.$assign = "PA31";
+I2C1.basicEnableController     = true;
+I2C1.basicControllerBusSpeed   = 400000;
+I2C1.advControllerTXFIFOTRIG   = "BYTES_1";
+I2C1.sdaPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric0";
+I2C1.sclPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric1";
 
-GPIO_START.$name                         = "START";
-GPIO_START.associatedPins[0].$name       = "BTN";
-GPIO_START.associatedPins[0].pin.$assign = "PA25";
-GPIO_START.associatedPins[0].direction   = "INPUT";
+/* PWM 电机 */
+PWM1.$name                              = "MOTOR_PWM";
+PWM1.timerStartTimer                    = true;
+PWM1.timerCount                         = 2133;
+PWM1.clockPrescale                      = 1;
+PWM1.peripheral.ccp0Pin.$assign         = "PB15";
+PWM1.peripheral.ccp1Pin.$assign         = "PB16";
+PWM1.PWM_CHANNEL_0.$name                = "ti_driverlib_pwm_PWMTimerCC0";
+PWM1.PWM_CHANNEL_1.$name                = "ti_driverlib_pwm_PWMTimerCC1";
 
-GPIO_DIR_A.$name                         = "DIR_A";
-GPIO_DIR_A.associatedPins.create(2);
-GPIO_DIR_A.associatedPins[0].$name       = "AIN1";
-GPIO_DIR_A.associatedPins[0].pin.$assign = "PA13";
-GPIO_DIR_A.associatedPins[1].$name       = "AIN2";
-GPIO_DIR_A.associatedPins[1].pin.$assign = "PA12";
+/* UART 调试 */
+UART1.$name                     = "UART_0";
+UART1.peripheral.txPin.$assign  = "PA10";
+UART1.peripheral.rxPin.$assign  = "PA11";
+UART1.basic.baudRate            = 115200;
+UART1.basic.dataLength          = "BITS_8";
+UART1.basic.parity              = "NONE";
+UART1.basic.stopBits            = "BITS_1";
+UART1.advanced.rxFIFOTrig       = "BYTES_1";
+UART1.advanced.txFIFOTrig       = "BYTES_1";
+UART1.txPinConfig.$name         = "ti_driverlib_gpio_GPIOPinGeneric2";
+UART1.rxPinConfig.$name         = "ti_driverlib_gpio_GPIOPinGeneric3";
 
-GPIO_DIR_B.$name                         = "DIR_B";
-GPIO_DIR_B.associatedPins.create(2);
-GPIO_DIR_B.associatedPins[0].$name       = "BIN1";
-GPIO_DIR_B.associatedPins[0].pin.$assign = "PB0";
-GPIO_DIR_B.associatedPins[1].$name       = "BIN2";
-GPIO_DIR_B.associatedPins[1].pin.$assign = "PB1";
-
-DEBUG_UART.$name                           = "DEBUG_UART";
-DEBUG_UART.targetBaudRate                  = 115200;
-DEBUG_UART.enableFIFO                      = true;
-DEBUG_UART.peripheral.rxPin.$assign        = "PA11";
-DEBUG_UART.peripheral.txPin.$assign        = "PA10";
-DEBUG_UART.txPinConfig.$name               = "ti_driverlib_gpio_GPIOPinGeneric0";
-DEBUG_UART.txPinConfig.direction           = scripting.forceWrite("OUTPUT");
-DEBUG_UART.txPinConfig.hideOutputInversion = scripting.forceWrite(false);
-DEBUG_UART.txPinConfig.onlyInternalResistor = scripting.forceWrite(false);
-DEBUG_UART.txPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
-DEBUG_UART.rxPinConfig.$name               = "ti_driverlib_gpio_GPIOPinGeneric1";
-DEBUG_UART.rxPinConfig.hideOutputInversion = scripting.forceWrite(false);
-DEBUG_UART.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
-DEBUG_UART.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
-
-MOTOR_PWM.$name                         = "MOTOR_PWM";
-MOTOR_PWM.timerStartTimer               = true;
-MOTOR_PWM.timerCount                    = 2133;
-MOTOR_PWM.clockPrescale                 = 1;
-MOTOR_PWM.peripheral.ccp0Pin.$assign    = "PB15";
-MOTOR_PWM.peripheral.ccp1Pin.$assign    = "PB16";
-MOTOR_PWM.PWM_CHANNEL_0.$name           = "ti_driverlib_pwm_PWMTimerCC0";
-MOTOR_PWM.PWM_CHANNEL_1.$name           = "ti_driverlib_pwm_PWMTimerCC1";
-
+/* 调试接口 */
 Board.peripheral.$suggestSolution          = "DEBUGSS";
 Board.peripheral.swclkPin.$suggestSolution = "PA20";
 Board.peripheral.swdioPin.$suggestSolution = "PA19";
-SYSCTL.peripheral.$suggestSolution         = "SYSCTL";
-DEBUG_UART.peripheral.$suggestSolution     = "UART0";
-MOTOR_PWM.peripheral.$suggestSolution      = "TIMG8";
+I2C1.peripheral.$suggestSolution           = "I2C0";
+PWM1.peripheral.$suggestSolution           = "TIMG8";
+UART1.peripheral.$suggestSolution          = "UART0";

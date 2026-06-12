@@ -1,153 +1,225 @@
 /**
- * main.c - PA25 start/stop + UART PID tuner car project
+ * @file main.c
+ * @brief MSPM0G3507 小车 PID 调试助手主程序
  *
- * Hardware assumptions:
- *   MCU: MSPM0G3507 Tianmengxing board
- *   Motor driver: TB6612FNG
- *   Motors: MG310 encoder motors
- *   Start key: PA25, active low
- *   PID tuner UART: PA10=TX, PA11=RX, 115200 8N1
+ * 功能：
+ *   1. PA25 启动/停止按键（边沿检测）
+ *   2. 编码器速度闭环 PI 控制
+ *   3. UART0 串口调参协议（兼容 PID 调试助手）
+ *   4. OLED 实时显示状态
  *
- * Control loop:
- *   1. PA25 toggles run/stop.
- *   2. PC sends SET/TARGET/STATUS/RESET text commands.
- *   3. MCU sends CSV speed/PWM/PID data for the PC PID tuner.
+ * 串口协议：
+ *   SET P:3.0000 I:1.0000 D:0.0000  -> 设置 PID 参数
+ *   TARGET L:60 R:60                -> 设置目标速度
+ *   STATUS                          -> 查询当前状态
+ *   RESET                           -> 重置 PID
+ *   STOP                            -> 停止电机
+ *
+ * CSV 输出格式：
+ *   timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki
  */
 
 #include "ti_msp_dl_config.h"
-#include "button.h"
-#include "encoder.h"
 #include "motor.h"
-#include "pid_tuner.h"
-#include "speed_pid.h"
+#include "encoder.h"
+#include "pid_ctrl.h"
+#include "oled.h"
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
-#define SPEED_PERIOD_MS       20U
-#define CSV_PERIOD_MS         40U
-#define DEFAULT_PWM_PER_PULSE 8
-#define DEFAULT_PWM_LIMIT     1500
-
-static volatile uint32_t g_ms_ticks;
+/* 时间基准 */
+volatile uint32_t sys_tick_ms = 0;
 
 void SysTick_Handler(void)
 {
-    g_ms_ticks++;
+    sys_tick_ms++;
 }
 
-static uint32_t millis(void)
+/* 延时函数 */
+static void delay_ms(uint32_t ms)
 {
-    return g_ms_ticks;
-}
-
-static bool start_key_raw_pressed(void)
-{
-    /* PA25 使用上拉输入，按键按下时接地，所以读到 0 表示按下。 */
-    return (DL_GPIO_readPins(START_PORT, START_BTN_PIN) == 0U);
-}
-
-static void set_run_led(bool running)
-{
-    if (running) {
-        DL_GPIO_setPins(GPIO_PORT, GPIO_LED_PIN);
-    } else {
-        DL_GPIO_clearPins(GPIO_PORT, GPIO_LED_PIN);
+    uint32_t start = sys_tick_ms;
+    while ((sys_tick_ms - start) < ms) {
+        __NOP();
     }
 }
 
+/* PA25 按键 IOMUX */
+#define START_BTN_IOMUX    IOMUX_PINCM42
+
+/* 按键检测 */
+static bool button_pressed(uint32_t port, uint32_t pin)
+{
+    return (DL_GPIO_readPins((GPIO_Regs *)port, pin) == 0U);
+}
+
+/* 串口命令缓冲区 */
+#define CMD_BUF_SIZE    64
+static char g_cmd_buf[CMD_BUF_SIZE];
+static int g_cmd_idx = 0;
+
+static void uart_rx_process(char c)
+{
+    if (c == '\n' || c == '\r') {
+        if (g_cmd_idx > 0) {
+            g_cmd_buf[g_cmd_idx] = '\0';
+            pid_tuner_parse_command(g_cmd_buf);
+            g_cmd_idx = 0;
+        }
+    } else if (g_cmd_idx < CMD_BUF_SIZE - 1) {
+        g_cmd_buf[g_cmd_idx++] = c;
+    }
+}
+
+/* 浮点转字符串 */
+static void ftoa_1d(float val, char *out)
+{
+    uint8_t p = 0U;
+    if (val < 0.0f) {
+        out[p++] = '-';
+        val = -val;
+    }
+    uint16_t iv = (uint16_t)val;
+    if (iv >= 1000U) iv = 999U;
+    if (iv >= 100U) out[p++] = (char)('0' + (iv / 100U));
+    if (iv >= 10U || p > 0U) out[p++] = (char)('0' + ((iv / 10U) % 10U));
+    out[p++] = (char)('0' + (iv % 10U));
+    out[p++] = '.';
+    out[p++] = (char)('0' + (uint8_t)((val - (float)iv) * 10.0f + 0.5f));
+    out[p] = '\0';
+}
+
+/* 主程序 */
 int main(void)
 {
-    Button start_btn;
-    SpeedPid pid_left;
-    SpeedPid pid_right;
-    uint32_t last_speed_ms = 0U;
-    uint32_t last_csv_ms = 0U;
-    int16_t speed_left = 0;
-    int16_t speed_right = 0;
-    int16_t pwm_left = 0;
-    int16_t pwm_right = 0;
-    bool running = false;
-
+    /* 系统初始化 */
     SYSCFG_DL_init();
-    SysTick_Config(CPUCLK_FREQ / 1000U);
 
-    /* PA25 必须显式上拉，否则按键悬空时会随机启停。 */
+    /* GPIO 初始化 */
     DL_GPIO_initDigitalInputFeatures(START_BTN_IOMUX,
         DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
-        DL_GPIO_HYSTERESIS_ENABLE, DL_GPIO_WAKEUP_DISABLE);
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
-    button_init(&start_btn, millis());
-    encoder_init();
+    /* 模块初始化 */
     motor_init();
-    pid_tuner_init();
+    encoder_init();
+    pid_ctrl_init();
 
-    speed_pid_init(&pid_left, g_pid_tuner.kp, g_pid_tuner.ki,
-        g_pid_tuner.kd, DEFAULT_PWM_PER_PULSE, DEFAULT_PWM_LIMIT);
-    speed_pid_init(&pid_right, g_pid_tuner.kp, g_pid_tuner.ki,
-        g_pid_tuner.kd, DEFAULT_PWM_PER_PULSE, DEFAULT_PWM_LIMIT);
+    /* OLED 初始化 */
+    OLED_Init();
+    OLED_Clear();
+    OLED_Puts(0, 0, "PID Tuner Car");
+    OLED_Puts(1, 0, "PA25: RUN/STOP");
+    OLED_Puts(2, 0, "UART0: 115200");
+    OLED_Puts(3, 0, "Ready...");
+    delay_ms(1000);
 
-    motor_stop();
-    set_run_led(false);
+    /* 主循环变量 */
+    bool running = false;
+    bool last_start = false;
+    int16_t speed_l = 0, speed_r = 0;
+    int16_t duty_l = 0, duty_r = 0;
+    int16_t balance = 0;
+    uint32_t last_ctrl_time = 0;
+    uint32_t last_csv_time = 0;
+    uint32_t last_oled_time = 0;
+    uint8_t csv_skip = 0;
+    char text[16];
 
+    /* 主循环 */
     while (1) {
-        uint32_t now = millis();
+        uint32_t now = sys_tick_ms;
 
-        /* 串口轮询放在主循环最高频位置，避免 PC 下发参数时被 CSV 输出饿死。 */
-        pid_tuner_poll();
+        /* 读取串口命令 */
+        while (!DL_UART_isRXFIFOEmpty(UART_0_INST)) {
+            char c = (char)DL_UART_Main_receiveData(UART_0_INST);
+            uart_rx_process(c);
+        }
 
-        if (button_update_pressed_event(&start_btn, start_key_raw_pressed(), now)) {
+        /* PA25 按键边沿检测 */
+        bool start_now = button_pressed(GPIOA, DL_GPIO_PIN_25);
+        if (!last_start && start_now) {
             running = !running;
-            speed_pid_reset(&pid_left);
-            speed_pid_reset(&pid_right);
-            pwm_left = 0;
-            pwm_right = 0;
             if (!running) {
-                motor_stop();
-            }
-            set_run_led(running);
-        }
-
-        if (g_pid_tuner.reset_request) {
-            g_pid_tuner.reset_request = false;
-            speed_pid_reset(&pid_left);
-            speed_pid_reset(&pid_right);
-            pwm_left = 0;
-            pwm_right = 0;
-            if (!running) {
-                motor_stop();
+                pid_ctrl_reset();
+                duty_l = 0;
+                duty_r = 0;
             }
         }
+        last_start = start_now;
 
-        if ((now - last_speed_ms) >= SPEED_PERIOD_MS) {
-            last_speed_ms = now;
-            encoder_sample_and_clear(&speed_left, &speed_right);
-
-            pid_left.kp = g_pid_tuner.kp;
-            pid_left.ki = g_pid_tuner.ki;
-            pid_left.kd = g_pid_tuner.kd;
-            pid_right.kp = g_pid_tuner.kp;
-            pid_right.ki = g_pid_tuner.ki;
-            pid_right.kd = g_pid_tuner.kd;
+        /* 速度闭环控制 (每 20ms) */
+        if ((now - last_ctrl_time) >= 20U) {
+            last_ctrl_time = now;
+            speed_l = encoder_left_get();
+            speed_r = encoder_right_get();
 
             if (running) {
-                pwm_left = speed_pid_update(&pid_left,
-                    g_pid_tuner.target_left, speed_left);
-                pwm_right = speed_pid_update(&pid_right,
-                    g_pid_tuner.target_right, speed_right);
-                motor_left_set(pwm_left);
-                motor_right_set(pwm_right);
+                balance = pid_speed_balance(speed_l, speed_r);
+                int16_t target_l = g_target_l - balance;
+                int16_t target_r = g_target_r + balance;
+                duty_l = ramp_to(duty_l, target_l);
+                duty_r = ramp_to(duty_r, target_r);
             } else {
-                pwm_left = 0;
-                pwm_right = 0;
-                speed_pid_reset(&pid_left);
-                speed_pid_reset(&pid_right);
+                duty_l = ramp_to(duty_l, 0);
+                duty_r = ramp_to(duty_r, 0);
+                pid_ctrl_reset();
+            }
+
+            if (duty_l == 0 && duty_r == 0) {
                 motor_stop();
+            } else {
+                motor_left_set(duty_l);
+                motor_right_set(duty_r);
             }
         }
 
-        if ((now - last_csv_ms) >= CSV_PERIOD_MS) {
-            last_csv_ms = now;
-            pid_tuner_send_csv(now, speed_left, speed_right, pwm_left, pwm_right);
+        /* CSV 输出 (每 20ms，跳过 4 次) */
+        if ((now - last_csv_time) >= 20U) {
+            last_csv_time = now;
+            if (++csv_skip >= 4) {
+                csv_skip = 0;
+                pid_tuner_output_csv(now, speed_l, speed_r, duty_l, duty_r);
+            }
         }
+
+        /* OLED 显示 (每 100ms) */
+        if ((now - last_oled_time) >= 100U) {
+            last_oled_time = now;
+
+            OLED_ClearPage(0);
+            OLED_Puts(0, 0, running ? "RUN" : "STOP");
+
+            OLED_ClearPage(1);
+            sprintf(text, "TL:%d TR:%d", g_target_l, g_target_r);
+            OLED_Puts(1, 0, text);
+
+            OLED_ClearPage(2);
+            sprintf(text, "SL:%d SR:%d", speed_l, speed_r);
+            OLED_Puts(2, 0, text);
+
+            OLED_ClearPage(3);
+            sprintf(text, "PL:%d PR:%d", duty_l, duty_r);
+            OLED_Puts(3, 0, text);
+
+            OLED_ClearPage(4);
+            sprintf(text, "P:%.1f I:%.1f", g_kp, g_ki);
+            OLED_Puts(4, 0, text);
+
+            OLED_ClearPage(5);
+            sprintf(text, "BAL:%d", balance);
+            OLED_Puts(5, 0, text);
+
+            OLED_ClearPage(6);
+            OLED_Puts(6, 0, "UART: 115200");
+
+            OLED_ClearPage(7);
+            sprintf(text, "T:%lu", now / 1000);
+            OLED_Puts(7, 0, text);
+        }
+
+        delay_ms(1);
     }
 }

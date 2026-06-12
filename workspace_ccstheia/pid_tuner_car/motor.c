@@ -1,71 +1,61 @@
+/**
+ * @file motor.c
+ * @brief TB6612FNG 电机驱动实现
+ */
+
 #include "motor.h"
 #include "ti_msp_dl_config.h"
 
-/* 左轮接 TB6612FNG B 通道：BIN1=PB0, BIN2=PB1。 */
+/* 方向引脚 IOMUX */
+#define DIR_L_BIN1_IOMUX    IOMUX_PINCM19   /* PB0 */
+#define DIR_L_BIN2_IOMUX    IOMUX_PINCM20   /* PB1 */
+#define DIR_R_AIN1_IOMUX    IOMUX_PINCM10   /* PA13 */
+#define DIR_R_AIN2_IOMUX    IOMUX_PINCM9    /* PA12 */
+
+/* 左轮方向控制 */
 static void left_dir(bool in1, bool in2)
 {
-    if (in1) DL_GPIO_setPins(DIR_B_PORT, DIR_B_BIN1_PIN);
-    else     DL_GPIO_clearPins(DIR_B_PORT, DIR_B_BIN1_PIN);
-
-    if (in2) DL_GPIO_setPins(DIR_B_PORT, DIR_B_BIN2_PIN);
-    else     DL_GPIO_clearPins(DIR_B_PORT, DIR_B_BIN2_PIN);
+    if (in1) DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_0);
+    else     DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_0);
+    if (in2) DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_1);
+    else     DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_1);
 }
 
-/* 右轮接 TB6612FNG A 通道：AIN1=PA13, AIN2=PA12。 */
+/* 右轮方向控制 */
 static void right_dir(bool in1, bool in2)
 {
-    if (in1) DL_GPIO_setPins(DIR_A_PORT, DIR_A_AIN1_PIN);
-    else     DL_GPIO_clearPins(DIR_A_PORT, DIR_A_AIN1_PIN);
-
-    if (in2) DL_GPIO_setPins(DIR_A_PORT, DIR_A_AIN2_PIN);
-    else     DL_GPIO_clearPins(DIR_A_PORT, DIR_A_AIN2_PIN);
+    if (in1) DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_13);
+    else     DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_13);
+    if (in2) DL_GPIO_setPins(GPIOA, DL_GPIO_PIN_12);
+    else     DL_GPIO_clearPins(GPIOA, DL_GPIO_PIN_12);
 }
 
-/* 把有符号 PWM 命令限制到安全范围，避免比较值越界。 */
-static uint16_t abs_limit_duty(int16_t duty)
+/* 左轮 PWM */
+static void left_pwm(int16_t duty)
 {
-    int16_t max_duty = (int16_t)(MOTOR_PWM_MAX - MOTOR_PWM_DEAD);
-
-    if (duty < 0) duty = (int16_t)(-duty);
-    if (duty > max_duty) duty = max_duty;
-
-    return (uint16_t)duty;
+    if (duty < 0) duty = 0;
+    if (duty > MOTOR_PWM_MAX) duty = MOTOR_PWM_MAX;
+    uint32_t compare = (uint32_t)(MOTOR_PWM_MAX - duty);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST, compare, GPIO_TIMG8_C0_IDX);
 }
 
-/* 左轮 PWM = PWMB = PB16 = TIMG8_C1。 */
-static void left_pwm(uint16_t duty)
+/* 右轮 PWM */
+static void right_pwm(int16_t duty)
 {
-    DL_TimerG_setCaptureCompareValue(MOTOR_PWM_INST,
-        (uint16_t)(MOTOR_PWM_MAX - duty), DL_TIMER_CC_1_INDEX);
+    if (duty < 0) duty = 0;
+    if (duty > MOTOR_PWM_MAX) duty = MOTOR_PWM_MAX;
+    uint32_t compare = (uint32_t)(MOTOR_PWM_MAX - duty);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST, compare, GPIO_TIMG8_C1_IDX);
 }
 
-/* 右轮 PWM = PWMA = PB15 = TIMG8_C0。 */
-static void right_pwm(uint16_t duty)
+void motor_init(void)
 {
-    DL_TimerG_setCaptureCompareValue(MOTOR_PWM_INST,
-        (uint16_t)(MOTOR_PWM_MAX - duty), DL_TIMER_CC_0_INDEX);
-}
-
-void motor_left_set(int16_t duty)
-{
-    if (duty >= 0) {
-        left_dir(false, true);
-    } else {
-        left_dir(true, false);
-    }
-
-    left_pwm(abs_limit_duty(duty));
-}
-
-void motor_right_set(int16_t duty)
-{
-    if (duty >= 0) {
-        right_dir(false, true);
-    } else {
-        right_dir(true, false);
-    }
-
-    right_pwm(abs_limit_duty(duty));
+    DL_GPIO_initDigitalOutput(DIR_L_BIN1_IOMUX);
+    DL_GPIO_initDigitalOutput(DIR_L_BIN2_IOMUX);
+    DL_GPIO_initDigitalOutput(DIR_R_AIN1_IOMUX);
+    DL_GPIO_initDigitalOutput(DIR_R_AIN2_IOMUX);
+    motor_stop();
+    DL_TimerG_startCounter(PWM_MOTOR_INST);
 }
 
 void motor_stop(void)
@@ -76,9 +66,30 @@ void motor_stop(void)
     right_pwm(0);
 }
 
-void motor_init(void)
+void motor_left_set(int16_t duty)
 {
-    /* SysConfig 会生成 GPIO 端口/引脚宏，这里只确保上电后先停车。 */
-    motor_stop();
-    DL_TimerG_startCounter(MOTOR_PWM_INST);
+    if (duty > 0) {
+        left_dir(false, true);
+        left_pwm(duty);
+    } else if (duty < 0) {
+        left_dir(true, false);
+        left_pwm(-duty);
+    } else {
+        left_dir(false, false);
+        left_pwm(0);
+    }
+}
+
+void motor_right_set(int16_t duty)
+{
+    if (duty > 0) {
+        right_dir(false, true);
+        right_pwm(duty);
+    } else if (duty < 0) {
+        right_dir(true, false);
+        right_pwm(-duty);
+    } else {
+        right_dir(false, false);
+        right_pwm(0);
+    }
 }
