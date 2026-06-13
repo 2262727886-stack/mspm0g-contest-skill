@@ -32,24 +32,13 @@ class SpeedBuffer:
         speed_ratio = avg_speed / tgt
         ss = sum(errs[len(errs)*7//10:])/max(1,len(errs)-len(errs)*7//10)
 
-        # 计算速度波动（标准差 + 相邻点波动）
+        # 计算速度波动（标准差）
         speeds = [(s.get("speed_L",0)+s.get("speed_R",0))/2 for s in self._data]
         avg_spd = sum(speeds)/len(speeds)
         variance = sum((s-avg_spd)**2 for s in speeds)/len(speeds)
         std_dev = variance ** 0.5
 
-        # 相邻采样点间波动 (跳动越小越稳定)
-        if len(speeds) > 1:
-            fluct = sum(abs(speeds[i]-speeds[i-1]) for i in range(1,len(speeds))) / (len(speeds)-1)
-        else:
-            fluct = 0
-
-        # 有效值: 速度在 target ± 0.3 内的采样点占比
-        valid_threshold = 0.3
-        valid_count = sum(1 for s in speeds if abs(s - avg_target) <= valid_threshold)
-        valid_ratio = valid_count / len(speeds) if speeds else 0
-
-        # 振荡指标
+        # 计算振荡指标：速度标准差与目标的比值
         osc_ratio = std_dev / tgt * 100
 
         # 改进的状态判断逻辑
@@ -70,7 +59,7 @@ class SpeedBuffer:
         else:
             st = "STABLE"
 
-        return {"status":st,"status_cn":STATUS_CN.get(st,st),"avg_error":round(avg,2),"avg_speed":round(avg_speed,2),"avg_target":round(avg_target,2),"avg_pwm":round(avg_pwm,1),"speed_ratio":round(speed_ratio,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc_ratio,1),"std_dev":round(std_dev,2),"fluctuation":round(fluct,2),"valid_ratio":round(valid_ratio,3),"valid_threshold":round(valid_threshold,1),"sample_count":len(self._data)}
+        return {"status":st,"status_cn":STATUS_CN.get(st,st),"avg_error":round(avg,2),"avg_speed":round(avg_speed,2),"avg_target":round(avg_target,2),"avg_pwm":round(avg_pwm,1),"speed_ratio":round(speed_ratio,2),"overshoot":round(overshoot,2),"steady_state_error":round(ss,2),"oscillation_index":round(osc_ratio,1),"std_dev":round(std_dev,2),"sample_count":len(self._data)}
 
     def to_prompt_data(self) -> str:
         if len(self._data) < 5: return "# Insufficient data"

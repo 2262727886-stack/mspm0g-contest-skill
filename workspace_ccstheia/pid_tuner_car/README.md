@@ -1,56 +1,66 @@
-# pid_tuner_car
+# PID 调试助手工程
 
-MSPM0G3507 小车 PID 调试工程：PA25 控制启停，PC 端 PID 调试助手通过 UART0 发送参数并接收 CSV 曲线数据。
+MSPM0G3507 小车 PID 调试助手，支持 PA25 启停按键和 UART0 串口调参。
 
-## 硬件连接
+## 硬件配置
 
-默认接线见 `PINMAP.md`。本工程按天猛星小车默认映射编写：
+| 外设功能 | 芯片/模块型号 | 天猛星引脚 | IOMUX索引 | 片上复用功能 | 备注 |
+|----------|--------------|-----------|-----------|-------------|------|
+| 右轮 PWM | TB6612FNG | PB15 | PINCM43 | TIMG8_C0 | A 通道 |
+| 左轮 PWM | TB6612FNG | PB16 | PINCM44 | TIMG8_C1 | B 通道 |
+| 右轮 AIN1 | TB6612FNG | PA13 | PINCM10 | GPIO | 方向控制 |
+| 右轮 AIN2 | TB6612FNG | PA12 | PINCM9 | GPIO | 方向控制 |
+| 左轮 BIN1 | TB6612FNG | PB0 | PINCM19 | GPIO | 方向控制 |
+| 左轮 BIN2 | TB6612FNG | PB1 | PINCM20 | GPIO | 方向控制 |
+| 右轮编码器 A | MG310 | PA15 | PINCM37 | GPIO | 双边沿中断 |
+| 左轮编码器 A | MG310 | PA17 | PINCM39 | GPIO | 双边沿中断 |
+| OLED SDA | SSD1306 | PA28 | PINCM45 | I2C0_SDA | 0x3C |
+| OLED SCL | SSD1306 | PA31 | PINCM48 | I2C0_SCL | 400kHz |
+| 调试 TX | CH340 | PA10 | PINCM6 | UART0_TX | 115200 |
+| 调试 RX | CH340 | PA11 | PINCM7 | UART0_RX | 115200 |
+| 启动按键 | 轻触开关 | PA25 | PINCM42 | GPIO | 上拉输入 |
+| LED | 板载 | PB22 | PINCM53 | GPIO | 状态指示 |
 
-- TB6612FNG A 通道接右轮，B 通道接左轮。
-- PA25 按键一端接 PA25，另一端接 GND，软件启用内部上拉。
-- CH340/USB 串口使用 PA10=TX、PA11=RX，115200 8N1。
-- PA10/PA11 已用于 UART0，不能同时接 MPU6050 I2C1。
+## 文件结构
 
-## 使用步骤
-
-1. CCS Theia 打开 `workspace_ccstheia/pid_tuner_car/`。
-2. 打开 `empty.syscfg`，确认引脚和你的实车一致。
-3. 编译并用 XDS110 烧录。
-4. 架空车轮，打开 `PID调试助手`，选择对应 COM 口和 115200 波特率。
-5. 按 PA25 启动/停止小车。
-
-## PC -> MCU 命令
-
-```text
-SET P:2.0000 I:0.0000 D:0.0000
-TARGET L:20 R:20
-STATUS
-RESET
-STOP
+```
+pid_tuner_car/
+├── main.c              ← 主程序
+├── motor.h / motor.c   ← TB6612FNG 电机驱动
+├── encoder.h / .c      ← 编码器测速
+├── pid_ctrl.h / .c     ← PID 控制器 + 串口协议
+├── oled.h / oled.c     ← SSD1306 OLED 驱动
+├── i2c_utils.h / .c    ← I2C 工具函数
+├── delay.h / delay.c   ← 延时函数
+├── empty.syscfg        ← SysConfig 引脚配置
+└── startup_mspm0g350x_ticlang.c ← 启动文件
 ```
 
-自动调参 GUI 内置并强制使用上述文本协议。`TARGET L:x R:x` 必须返回 `OK TARGET L=x R=x`，`STATUS` 必须返回 `TL=x TR=x`，否则 GUI 会认为 PC 到 MCU 的 RX 链路未打通并停止调参。
+## 串口调参协议
 
-## MCU -> PC CSV
+串口配置：COM5, 115200, 8N1
 
-每 40ms 输出一行：
+| 命令 | 含义 | 示例 |
+|------|------|------|
+| `SET P:3.0000 I:1.0000 D:0.0000` | 设置 PID 参数 | `SET P:5.0000 I:2.0000 D:0.0000` |
+| `TARGET L:60 R:60` | 设置目标速度 | `TARGET L:80 R:80` |
+| `STATUS` | 查询当前状态 | |
+| `RESET` | 重置 PID | |
+| `STOP` | 停止电机 | |
 
-```text
+## CSV 输出格式
+
+每 80ms 输出一次 CSV 数据（兼容 PID 调试助手）：
+
+```
 timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki
+1200,58,59,60,60,780,790,3.0,1.0
 ```
 
-示例：
+## 调参建议
 
-```text
-1200,18,19,20,20,620,630,2.000,0.000
-```
-
-## 调试建议
-
-- 首次测试必须架空车轮。
-- 串口必须全双工交叉接线：PA10(TX) 接 CH340 RX，PA11(RX) 接 CH340 TX，并共地。
-- 先发送 `TARGET L:20 R:20` 和 `SET P:2.0000 I:0.0000 D:0.0000`，确认速度能被 P-only 拉住，再逐步加 I。
-- 本工程默认只做正向速度闭环，PID 输出不会反向倒车。
-- PWM 前馈按目标速度线性给出，默认 `8 PWM/脉冲`；如果速度长期高于目标，先降低 P/I，不要继续加 I。
-- 如果车轮方向反了，优先检查 TB6612 A/B 通道和 `motor_left_set()` / `motor_right_set()` 的方向极性。
-- 如果串口助手收不到 CSV，确认 PA10/PA11 没有被 I2C1/MPU6050 占用。
+1. **测最大速度**: 发送 `TARGET L:999 R:999`
+2. **设目标**: `T=上限*0.9`
+3. **P-only**: `SET P:5.0000 I:0.0000 D:0.0000`
+4. **加积分**: `SET P:5.0000 I:2.0000 D:0.0000`
+5. **防振荡**: 降 P 或加 D
