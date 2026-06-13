@@ -84,7 +84,7 @@
 
 ## 演示视频
 
-[![B站演示视频](https://img.shields.io/badge/B站-演示视频-pink?style=for-the-badge&logo=bilibili)](https://www.bilibili.com/video/BV1CzEV6ZEJd/)
+[![视频封面](https://i0.hdslb.com/bfs/archive/c4326c0540727e34a9a8819ea0bf9fab7135bc79.jpg)](https://www.bilibili.com/video/BV1CzEV6ZEJd/)
 
 ---
 
