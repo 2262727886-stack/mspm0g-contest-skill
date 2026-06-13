@@ -82,6 +82,10 @@
 - **想基于 K230 做视觉追踪**：看 `workspace_ccstheia/test_2/` 和 [K230 视觉方案](#k230-视觉方案)。
 - **想深入了解内部设计**：看 `.claude/skills/mspm0g-contest/SKILL.md`。
 
+## 演示视频
+
+[![B站演示视频](https://img.shields.io/badge/B站-演示视频-pink?style=for-the-badge&logo=bilibili)](https://www.bilibili.com/video/BV1CzEV6ZEJd/)
+
 ---
 
 ## 这个项目适合什么场景
