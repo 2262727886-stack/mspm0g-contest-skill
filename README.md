@@ -97,6 +97,7 @@
 - 舵机云台：众灵 PM 系列舵机 (500~2500us, 50Hz)，姿态随动
 - 蓝牙无线调参：JDY-31 BLE 透传，手机/Python 远程调速调参
 - 实时调试：OLED 多页显示 + VOFA+ 波形输出
+- 配套PID调试助手全栈式开发
 
 ## 它不是做什么的
 
@@ -125,17 +126,13 @@ cd mspm0g-contest-skill
 | MSPM0 SDK | https://www.ti.com/tool/MSPM0-SDK | v2.10.00.04 |
 | XDS110 驱动 | 随 CCS Theia 安装 | SWD 调试器 |
 
-### 第 3 步：打开基线工程
+### 第 3 步：使用skill
 
-CCS Theia → File → Open Folder → 选 `workspace_ccstheia/mpu6050_clean/`
+提供AI AGENT对应的prompt
 
-### 第 4 步：检查引脚
+### 第 4 步：纠错和优化项目
 
-打开 `.syscfg`，确认外设引脚和你的实际接线一致。**这是最多人出错的步骤。**
-
-### 第 5 步：编译 + 烧录
-
-Ctrl+B 编译 → Debug 按钮 → XDS110 烧录
+根据报错和实际硬件工作状态让AI辅助优化
 
 ### VS Code 用户
 
@@ -278,17 +275,6 @@ workspace_ccstheia/
 
 ---
 
-## 推荐学习路径
-
-```
-第1步: mpu6050_clean   (1-2天)  -> 编码器+PWM+PID底盘控制基础
-第2步: imu601          (1天)    -> UART vs I2C IMU方案 + 转弯PID
-第3步: jdy31_pid_test  (0.5天)  -> 蓝牙透传 + 在线改PID
-第4步: pid_tuner_car    (0.5天)  -> PID调试助手 + PA25启停 + 串口调参
-第5步: test_2           (2-3天)  -> K230+MSPM0G全链路 + LAB色块校准
-```
-
----
 
 ## Claude Code Skill 完整指南
 
@@ -412,6 +398,8 @@ python PID_DEMO/gui.py
 | 自动调参 | 仿真或硬件自动调参 |
 | 手动配置 | 手动输入 Kp/Ki/Kd 并观察曲线 |
 | LLM 设置 | 配置 API Key、Base URL、模型和代理 |
+
+
 
 #### 4. 命令行启动
 
