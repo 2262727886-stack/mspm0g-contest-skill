@@ -1,22 +1,49 @@
+/**
+ * pid_tuner.c — PID 调试助手串口通信实现
+ *
+ * 功能:
+ *   1. 接收 PC 命令 (SET/TARGET/STATUS/RESET/STOP)
+ *   2. 解析并更新全局 PID 参数
+ *   3. 发送 CSV 格式数据给 PC (速度/PWM/PID)
+ *
+ * 串口配置: UART0, 115200 8N1, PA10=TX, PA11=RX
+ */
 #include "pid_tuner.h"
 #include "ti_msp_dl_config.h"
 #include <stdio.h>
 #include <string.h>
 
-#define CMD_BUF_SIZE  64
+#define CMD_BUF_SIZE  64  /* 命令缓冲区大小 */
 
+/**
+ * 全局 PID 状态 (默认值)
+ *
+ * ╔══════════════════════════════════════════════════════════════╗
+ * ║  ★★★ 在这里填入 PID 调参助手找到的最优值 ★★★              ║
+ * ║                                                              ║
+ * ║  从 GUI 的「推荐 PID」或「最终验证」结果中复制:             ║
+ * ║    kp = P 值                                                 ║
+ * ║    ki = I 值                                                 ║
+ * ║    kd = D 值 (速度环通常为 0)                               ║
+ * ║    target_left/right = 目标速度 (脉冲/20ms)                 ║
+ * ╚══════════════════════════════════════════════════════════════╝
+ */
 PidTunerState g_pid_tuner = {
-    2.0f,
-    0.0f,
-    0.0f,
-    20,
-    20,
-    false
+    5.4f,   /* kp — 比例系数 (调参助手结果填这里) */
+    1.8f,   /* ki — 积分系数 (调参助手结果填这里) */
+    0.0f,   /* kd — 微分系数 (速度环通常为 0) */
+    20,     /* target_left  — 左轮目标速度 (脉冲/20ms) */
+    20,     /* target_right — 右轮目标速度 (脉冲/20ms) */
+    false   /* reset_request — PC 下发重置时置 true */
 };
 
+/* 命令接收缓冲区 */
 static char g_cmd_buf[CMD_BUF_SIZE];
 static uint8_t g_cmd_idx;
 
+/**
+ * UART 发送字符串 (阻塞, 等 FIFO 有空位)
+ */
 static void uart_send_text(const char *text)
 {
     while (*text != '\0') {
@@ -27,6 +54,9 @@ static void uart_send_text(const char *text)
     }
 }
 
+/**
+ * 浮点数限幅
+ */
 static float clamp_float(float value, float min_value, float max_value)
 {
     if (value < min_value) return min_value;
@@ -34,6 +64,9 @@ static float clamp_float(float value, float min_value, float max_value)
     return value;
 }
 
+/**
+ * 目标速度限幅 (0~200, 防止电机失控)
+ */
 static int16_t clamp_target(int value)
 {
     if (value > 200) return 200;
@@ -41,6 +74,17 @@ static int16_t clamp_target(int value)
     return (int16_t)value;
 }
 
+/**
+ * 解析 PC 下发的命令
+ *
+ * 支持的命令:
+ *   "SET P:2.5 I:1.0 D:0.0"  → 设置 PID 参数
+ *   "SET P:2.5 I:1.0"         → 设置 PD (D 不变)
+ *   "TARGET L:60 R:60"        → 设置左右轮目标速度
+ *   "STATUS"                  → 查询当前参数
+ *   "RESET"                   → 重置为默认值
+ *   "STOP"                    → 停车
+ */
 static void parse_tuner_cmd(const char *cmd)
 {
     float p, i, d;
@@ -92,6 +136,11 @@ static void parse_tuner_cmd(const char *cmd)
     }
 }
 
+/**
+ * 轮询 UART 接收缓冲区, 收到完整行后解析命令
+ *
+ * 在主循环中高频调用 (每轮都检查), 避免 PC 命令被 CSV 输出阻塞。
+ */
 void pid_tuner_poll(void)
 {
     while (!DL_UART_Main_isRXFIFOEmpty(DEBUG_UART_INST)) {
@@ -105,17 +154,26 @@ void pid_tuner_poll(void)
         } else if (g_cmd_idx < (CMD_BUF_SIZE - 1U)) {
             g_cmd_buf[g_cmd_idx++] = (char)ch;
         } else {
-            g_cmd_idx = 0U;
+            g_cmd_idx = 0U;  /* 缓冲区溢出, 丢弃 */
         }
     }
 }
 
+/**
+ * 初始化 PID 调试助手
+ */
 void pid_tuner_init(void)
 {
     g_cmd_idx = 0U;
     uart_send_text("MSPM0G PID Tuner Car Ready\r\n");
 }
 
+/**
+ * 发送 CSV 数据给 PC
+ *
+ * 格式: timestamp,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki
+ * PC PID 调试助手解析此数据计算误差/超调等指标。
+ */
 void pid_tuner_send_csv(uint32_t timestamp_ms,
                         int16_t speed_left, int16_t speed_right,
                         int16_t pwm_left, int16_t pwm_right)
