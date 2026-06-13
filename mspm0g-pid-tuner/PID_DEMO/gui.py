@@ -103,7 +103,7 @@ class Curve(tk.Canvas):
         if len(self.data)>self.max_pts:self.data.pop(0)
         self.draw()
     def _axes(self,w,h,min_y,max_y):
-        M=46;R=16;B=30  # margins: left, right, bottom
+        M=56;R=20;B=30  # margins: left, right, bottom (增加边距)
         pw=w-M-R;ph=h-B-20
         if pw<10:return M,R,B,pw,ph
         n_ticks=4
@@ -111,13 +111,13 @@ class Curve(tk.Canvas):
             val=min_y+(max_y-min_y)*i/n_ticks
             y=B+ph-ph*i/n_ticks
             self.create_line(M,y,w-R,y,fill="#e8eef5",dash=(2,4) if i>0 else None,width=1)
-            self.create_text(M-4,y,text=f"{val:.0f}",font=("Consolas",8),fill=C["sub"],anchor=tk.E)
+            self.create_text(M-6,y,text=f"{val:.0f}",font=("Consolas",8),fill=C["sub"],anchor=tk.E)
         if min_y < 0 < max_y:
             zy=B+ph-ph*(0-min_y)/(max_y-min_y)
             self.create_line(M,zy,w-R,zy,fill="#cbd5e1",width=1.2)
         self.create_line(M,B,w-R,B,fill=C["border"])
         self.create_text(w//2,B+16,text="采样点",font=F["s"],fill=C["sub"],anchor=tk.N)
-        self.create_text(8,h//2,text="速度",font=F["s"],fill=C["sub"],anchor=tk.S,angle=90)
+        self.create_text(12,h//2,text="速度",font=F["s"],fill=C["sub"],anchor=tk.S,angle=90)
         return M,R,B,pw,ph
     def draw(self):
         self.delete("all");w=self.winfo_width();h=self.H
@@ -146,7 +146,13 @@ class Curve(tk.Canvas):
         if pts:
             lx=pts[-2];ly=pts[-1]
             self.create_oval(lx-4,ly-4,lx+4,ly+4,fill=C["accent"],outline="white",width=2,tags="curve")
-            self.create_text(lx+10,ly-8,text=f"{self.data[-1]:.1f}",font=("Consolas",9,"bold"),fill=C["accent"],anchor=tk.W,tags="curve")
+            # 确保速度值在可见区域内
+            text_x = lx + 10
+            text_anchor = tk.W
+            if text_x > w - R - 50:  # 如果太靠右，改为左对齐
+                text_x = lx - 10
+                text_anchor = tk.E
+            self.create_text(text_x, ly-8, text=f"{self.data[-1]:.1f}", font=("Consolas",9,"bold"), fill=C["accent"], anchor=text_anchor, tags="curve")
         self.create_rectangle(M+6,6,M+126,24,fill=C["card"],outline=C["border"],tags="curve")
         self.create_line(M+12,14,M+28,14,fill=C["accent"],width=2,tags="curve")
         self.create_text(M+44,14,text="速度",font=F["s"],fill=C["text"],anchor=tk.W,tags="curve")
@@ -161,7 +167,17 @@ class App:
         self.root.geometry("1180x760");self.root.minsize(980,620)
         self.root.configure(bg=C["bg"])
         self._style_ttk()
-        self.config=load_config("config.json") if os.path.exists("config.json") else dict(DEFAULT_CONFIG)
+        # 优先从 exe 同目录加载 config.json (PyInstaller 打包后 cwd 可能不对)
+        self._cfg_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "config.json")
+        if not os.path.exists(self._cfg_path):
+            self._cfg_path = "config.json"
+        self.config = load_config(self._cfg_path)
+        # 启动诊断
+        _llm_ok = self.config.get("LLM_API_KEY","") not in ("","sk-your-key-here")
+        _url = self.config.get("LLM_API_BASE_URL","")
+        _model = self.config.get("LLM_MODEL_NAME","")
+        print(f"[CONFIG] path={self._cfg_path} exists={os.path.exists(self._cfg_path)}")
+        print(f"[LLM] key={'SET' if _llm_ok else 'MISSING'} url={_url} model={_model}")
         self.running=False;self._stop_event=threading.Event();self.q=queue.Queue();self.pid={"p":5.0,"i":2.0,"d":0.0}
         self._bridge=None;self._conn=False;self.mode="auto"
         self._top_bar()
@@ -236,7 +252,7 @@ class App:
 
         _lbl(self._left,"工作区",F["h"],C["text"]).pack(anchor=tk.W,padx=16,pady=(16,8))
         self._nav={}
-        for mode,label in [("auto","自动调参"),("manual","手动配置"),("settings","LLM 设置")]:
+        for mode,label in [("auto","自动调参"),("manual","手动配置"),("sim_cfg","仿真设置"),("settings","LLM 设置")]:
             b=tk.Button(self._left,text=label,font=F["b"],fg=C["sub"],bg=C["card"],
                         activebackground="#dff6f1",activeforeground=C["accent"],
                         relief=tk.FLAT,bd=0,padx=16,pady=11,cursor="hand2",
@@ -276,7 +292,7 @@ class App:
 
         # 构建各页
         self._pages={}
-        self._build_auto();self._build_manual();self._build_settings()
+        self._build_auto();self._build_manual();self._build_sim_cfg();self._build_settings()
 
     def _show_page(self,mode):
         self.mode=mode
@@ -292,28 +308,30 @@ class App:
         pg=tk.Frame(self._center,bg=C["bg"]);self._pages["auto"]=pg
 
         bar=_card(pg);bar.pack(fill=tk.X,pady=(0,10))
-        r=tk.Frame(bar,bg=C["card"]);r.pack(fill=tk.X)
-        # 模式选择
+        # 第一行: 模式 + 算法 + 按钮
+        r1=tk.Frame(bar,bg=C["card"]);r1.pack(fill=tk.X,pady=(0,4))
         self._auto_mode=tk.StringVar(value="sim")
-        _lbl(r,"模式:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
+        _lbl(r1,"模式:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
         for mode,label in [("sim","仿真"),("hw","硬件")]:
-            tk.Radiobutton(r,text=label,variable=self._auto_mode,value=mode,font=F["b"],
+            tk.Radiobutton(r1,text=label,variable=self._auto_mode,value=mode,font=F["b"],
                           bg=C["card"],fg=C["text"],activebackground=C["card"],
                           selectcolor=C["card"],cursor="hand2",
                           command=lambda m=mode:self._mode_changed(m)).pack(side=tk.LEFT,padx=(0,8))
-        tk.Frame(r,bg=C["border"],width=1).pack(side=tk.LEFT,fill=tk.Y,padx=6)
-        # 算法/轮次/目标
-        self._auto_algo=ttk.Combobox(r,values=["LLM 大模型","贝叶斯优化","Ziegler-Nichols","继电反馈法"],state="readonly",width=14,font=F["b"])
+        tk.Frame(r1,bg=C["border"],width=1).pack(side=tk.LEFT,fill=tk.Y,padx=6)
+        self._auto_algo=ttk.Combobox(r1,values=["LLM 大模型","引导调参 P→I→D","贝叶斯优化","Ziegler-Nichols","继电反馈法"],state="readonly",width=14,font=F["b"])
         self._auto_algo.set("LLM 大模型");self._auto_algo.pack(side=tk.LEFT,padx=(4,8))
-        _lbl(r,"轮次:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
-        self._auto_rnd=_ent(r,15,4);self._auto_rnd.pack(side=tk.LEFT,padx=(0,8))
-        _lbl(r,"目标:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
-        self._auto_tgt=_ent(r,60,4);self._auto_tgt.pack(side=tk.LEFT)
-        self._auto_btn=_btn(r,"开始调参",self._auto_start,pri=True)
+        self._auto_btn=_btn(r1,"开始调参",self._auto_start,pri=True)
         self._auto_btn.pack(side=tk.RIGHT)
-        # mode status
-        self._auto_mode_lbl=_lbl(r,"",F["s"],C["muted"])
+        self._auto_mode_lbl=_lbl(r1,"",F["s"],C["muted"])
         self._auto_mode_lbl.pack(side=tk.RIGHT,padx=(0,10))
+        # 第二行: 轮次 + 目标 + 秒/轮
+        r2=tk.Frame(bar,bg=C["card"]);r2.pack(fill=tk.X)
+        _lbl(r2,"轮次:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
+        self._auto_rnd=_ent(r2,15,4);self._auto_rnd.pack(side=tk.LEFT,padx=(0,12))
+        _lbl(r2,"目标:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
+        self._auto_tgt=_ent(r2,60,4);self._auto_tgt.pack(side=tk.LEFT,padx=(0,12))
+        _lbl(r2,"秒/轮:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,2))
+        self._auto_sec=_ent(r2,5,3);self._auto_sec.pack(side=tk.LEFT)
 
         # PID 卡片
         cd=tk.Frame(pg,bg=C["bg"]);cd.pack(fill=tk.X,pady=(0,10))
@@ -344,23 +362,31 @@ class App:
         except:mr=15
         try:tgt=int(self._auto_tgt.get())
         except:tgt=60
+        try:sec_per_round=float(self._auto_sec.get())
+        except:sec_per_round=5.0
         self._auto_log.delete(1.0,tk.END);self._curve.clear();self.q.put(("target",tgt))
-        self._auto_log_msg(f"[自动调参] 算法: {algo} | 轮次: {mr} | 目标: {tgt}")
+        self._auto_log_msg(f"[自动调参] 算法: {algo} | 轮次: {mr} | 目标: {tgt} | {sec_per_round:.0f}秒/轮")
         if hasattr(self,'_auto_btn'):
             self._auto_btn.config(text=" 停止 ",bg=C["red"],fg="white")
-        threading.Thread(target=self._auto_worker,args=(algo,mr,tgt),daemon=True).start()
+        threading.Thread(target=self._auto_worker,args=(algo,mr,tgt,sec_per_round),daemon=True).start()
 
-    def _auto_worker(self,algo,mr,tgt):
+    def _auto_worker(self,algo,mr,tgt,sec_per_round=10.0):
         """统一调参引擎: 硬件优先, 未连接则仿真"""
         try:
-            self._auto_worker_inner(algo,mr,tgt)
+            self._auto_worker_inner(algo,mr,tgt,sec_per_round)
         except Exception as e:
             import traceback
             self._auto_log_msg(f"[致命错误] {e}")
             self._auto_log_msg(traceback.format_exc()[-300:])
             self.q.put(("done",None))
 
-    def _auto_worker_inner(self,algo,mr,tgt):
+    def _auto_worker_inner(self,algo,mr,tgt,sec_per_round=10.0):
+        # 引导调参走独立流程
+        if algo == "引导调参 P→I→D":
+            use_hw = (self._auto_mode.get() == "hw")
+            self._guided_worker(tgt, sec_per_round, use_hw)
+            return
+
         from PID_DEMO.sim_adapter import SimAdapter
         from PID_DEMO.engine import run_tuning_engine
         from PID_DEMO.buffer import SpeedBuffer
@@ -399,7 +425,8 @@ class App:
                 self.q.put(("done",None));return
             self._auto_log_msg(f"[检测] 收到 {len(samples)} 点数据, 开始调参")
         else:
-            bridge=SimAdapter(kp=2.0,ki=0.0,target=tgt); using_hw=False
+            motor_params = self.config.get("SIM_MOTOR_PARAMS", None)
+            bridge=SimAdapter(kp=2.0,ki=0.0,target=tgt,motor_params=motor_params); using_hw=False
             self._auto_log_msg("[仿真模式] 本地模型")
 
         # ── 预热: P-only 扫频找起点 ──
@@ -446,8 +473,11 @@ class App:
                 if now_t-last_curve_push[0]>=0.05:
                     last_curve_push[0]=now_t
                     self.q.put(("curve",sample.get("speed_L",0)))
+            # 根据秒/轮计算 buffer_size (50 samples/sec)
+            engine_config = dict(self.config)
+            engine_config["BUFFER_SIZE"] = int(sec_per_round * 50)
             final=run_tuning_engine(
-                bridge=bridge,config=self.config,current_pid=best_p,
+                bridge=bridge,config=engine_config,current_pid=best_p,
                 on_sample=push_curve_throttled,
                 on_round_complete=lambda r,pid,m,res:(
                     self.q.put(("pid",pid)),
@@ -467,6 +497,259 @@ class App:
             self._auto_log_msg(f"[异常] {e}")
         finally:
             self.q.put(("done",None))
+
+    # ═══ 引导调参 P→I→D ═══
+    def _guided_worker(self, tgt, sec_per_round=10.0, use_hw=False):
+        from PID_DEMO.sim_adapter import SimAdapter
+        from PID_DEMO.buffer import SpeedBuffer
+        import time
+
+        motor_params = self.config.get("SIM_MOTOR_PARAMS", None)
+        steps_per_round = int(sec_per_round * 50)  # 50 samples/sec
+
+        # 硬件模式: 连接串口
+        hw_bridge = None
+        if use_hw:
+            from PID_DEMO.bridge import SerialBridge
+            port = self._tb_port.get().strip() or "AUTO"
+            try: baud = int(self._tb_baud.get())
+            except: baud = 115200
+            hw_bridge = SerialBridge(port=port, baud=baud)
+            if not hw_bridge.connect():
+                self._auto_log_msg("[错误] 无法打开串口")
+                self.q.put(("done", None)); return
+            hw_bridge.set_target(tgt, tgt)
+            hw_bridge.flush()
+            self._auto_log_msg(f"[硬件模式] 串口 {port} @ {baud}")
+            # 验证数据
+            samples = hw_bridge.read_samples(5, timeout_s=6.0)
+            if len(samples) < 2:
+                self._auto_log_msg("[错误] 未收到 MCU 数据")
+                hw_bridge.disconnect()
+                self.q.put(("done", None)); return
+            self._auto_log_msg(f"[检测] 收到 {len(samples)} 点, 开始调参")
+
+        def make_bridge(p, i):
+            """创建 bridge: 硬件用共享串口, 仿真每次新建"""
+            if use_hw:
+                hw_bridge.set_pid(p, i, 0)
+                return hw_bridge
+            else:
+                return SimAdapter(kp=p, ki=i, target=tgt, motor_params=motor_params)
+
+        def collect(bridge, p, i, d, steps=None, warmup_ratio=0.3):
+            """采集数据, 返回 {steady: 稳态指标, full: 全程指标}"""
+            if steps is None: steps = steps_per_round
+            bridge.set_pid(p, i, d)
+            all_samples = []
+            for idx in range(steps):
+                if self._stop_event.is_set(): return None
+                s = bridge.read_sample()
+                if s:
+                    all_samples.append(s)
+                    if idx % 5 == 0:
+                        self.q.put(("curve", s.get("speed_L", 0)))
+                if not use_hw:
+                    time.sleep(0.005)  # 仿真需要延时, 硬件不需要
+            if not all_samples: return None
+            # 全程指标 (含瞬态超调)
+            full_buf = SpeedBuffer(len(all_samples))
+            for s in all_samples: full_buf.add(s)
+            full_m = full_buf.calculate_metrics()
+            # 稳态指标 (跳过瞬态)
+            warmup_n = int(len(all_samples) * warmup_ratio)
+            steady_samples = all_samples[warmup_n:]
+            if len(steady_samples) < 10:
+                steady_samples = all_samples
+            steady_buf = SpeedBuffer(len(steady_samples))
+            for s in steady_samples: steady_buf.add(s)
+            steady_m = steady_buf.calculate_metrics()
+            return {"steady": steady_m, "full": full_m}
+
+        self._auto_log_msg("═" * 50)
+        self._auto_log_msg("【引导调参】先调 P → 再加 I → 最后加 D")
+        self._auto_log_msg(f"目标速度: {tgt} 脉冲/20ms")
+        self._auto_log_msg("═" * 50)
+
+        # ── 评分函数 ──
+        def score_pi(result):
+            """评分: 到达target > 稳态有效值 > 波动小 > 瞬态超调少"""
+            sm = result["steady"]   # 稳态指标
+            fm = result["full"]     # 全程指标 (含瞬态)
+            ratio = sm.get("speed_ratio", 0)
+            fluc = sm.get("fluctuation", 99)
+            vr = sm.get("valid_ratio", 0)
+            full_over = fm.get("overshoot", 0)  # 瞬态超调
+            # 到不了 target 直接淘汰
+            if ratio < 0.90: return -100 + ratio * 10
+            # 有效值多 + 波动小 + 瞬态超调少
+            return vr * 50 - fluc * 5 - full_over * 0.5
+
+        def score_d(result):
+            sm = result["steady"]
+            fm = result["full"]
+            return -fm["overshoot"] * 3 - sm["avg_error"] * 2
+
+        # ── 贝叶斯优化工具 ──
+        import math, random as _rnd
+
+        def bayesian_opt(collect_fn, p_i_pairs, score_fn, n_rounds, log_prefix, var_name):
+            """贝叶斯优化: 网格初筛 → EI 采样精搜"""
+            observations = []  # [(p, i, score, metrics)]
+
+            # 初筛: 网格点
+            self._auto_log_msg(f"  初筛 {len(p_i_pairs)} 个候选点...")
+            for (tp, ti) in p_i_pairs:
+                if self._stop_event.is_set(): return None, None, None
+                m = collect_fn(tp, ti)
+                if m is None: return None, None, None
+                sc = score_fn(m)
+                observations.append((tp, ti, sc, m))
+                sm = m["steady"]; fm = m["full"]
+                tag = " ★" if sc == max(o[2] for o in observations) else ""
+                self._auto_log_msg(f"  {var_name}={tp:.1f}/{ti:.1f} → speed={sm['avg_speed']:.0f} 有效={sm['valid_ratio']*100:.0f}% 波动={sm['fluctuation']:.2f} 瞬超={fm['overshoot']:.0f}% 评分={sc:.1f}{tag}")
+
+            # 贝叶斯精搜: 在最佳点附近精细网格搜索
+            self._auto_log_msg(f"  精搜 ({n_rounds} 轮, 最佳点附近)...")
+            for rnd in range(n_rounds):
+                if self._stop_event.is_set(): break
+                best_obs = max(observations, key=lambda o: o[2])
+                best_sc = best_obs[2]
+                bp, bi = best_obs[0], best_obs[1]
+
+                # 在最佳点附近生成精细候选 (每轮范围缩小)
+                shrink = 0.6 ** rnd  # 每轮缩小 40%
+                p_step = max(0.5, bp * 0.15 * shrink)
+                i_step = max(0.1, bi * 0.2 * shrink)
+                candidates = []
+                for dp in [-p_step, 0, p_step]:
+                    for di in [-i_step, 0, i_step]:
+                        cp = max(1, round(bp + dp, 1))
+                        ci = max(0.1, round(bi + di, 1))
+                        if (cp, ci) not in [(o[0], o[1]) for o in observations]:
+                            candidates.append((cp, ci))
+
+                if not candidates:
+                    self._auto_log_msg(f"  [{rnd+1}] 无新候选点, 跳过")
+                    continue
+
+                # 评估所有候选
+                for (tp, ti) in candidates:
+                    m = collect_fn(tp, ti)
+                    if m is None: break
+                    sc = score_fn(m)
+                    observations.append((tp, ti, sc, m))
+                    if sc > best_sc:
+                        tag = " ★"
+                        best_sc = sc
+                    else:
+                        tag = ""
+                    sm = m["steady"]; fm = m["full"]
+                    self._auto_log_msg(f"  [{rnd+1}] {var_name}={tp:.1f}/{ti:.1f} → speed={sm['avg_speed']:.0f} 有效={sm['valid_ratio']*100:.0f}% 波动={sm['fluctuation']:.2f} 瞬超={fm['overshoot']:.0f}% 评分={sc:.1f}{tag}")
+
+            best = max(observations, key=lambda o: o[2])
+            return best[0], best[1], best[3]
+
+        # ── 阶段1: P+I 贝叶斯优化 ──
+        self._auto_log_msg("")
+        self._auto_log_msg("━━ 阶段1: P+I 贝叶斯优化 ━━")
+        self._auto_log_msg("网格初筛 → EI 精搜最优 P+I")
+        self._auto_log_msg("")
+
+        pi_grid = [(p, i) for p in [3, 5, 8, 10, 15, 20] for i in [0.3, 0.5, 1.0, 1.5, 2.0, 3.0]]
+        def collect_pi(p, i):
+            bridge = make_bridge(p, i)
+            return collect(bridge, p, i, 0)
+
+        best_p, best_i, m1 = bayesian_opt(collect_pi, pi_grid, score_pi, 8, "P+I", "P/I")
+        if best_p is None: self._auto_log_msg("[已停止]"); self.q.put(("done",None)); return
+
+        self.q.put(("pid", {"p": best_p, "i": best_i, "d": 0}))
+        self._auto_log_msg(f"")
+        self._auto_log_msg(f"✓ 阶段1结论: P={best_p:.1f} I={best_i:.1f}")
+
+        # ── 阶段2: D 贝叶斯优化 ──
+        self._auto_log_msg("")
+        self._auto_log_msg("━━ 阶段2: D 贝叶斯优化 ━━")
+        self._auto_log_msg("固定 P+I, 搜索最佳 D")
+        self._auto_log_msg("")
+
+        d_grid = [(best_p, best_i)]  # D 用 1D 搜索, P/I 固定
+        observations_d = []
+
+        # 初筛 D 候选
+        d_candidates = [0.0, 0.1, 0.2, 0.3, 0.5, 1.0, 2.0]
+        for test_d in d_candidates:
+            if self._stop_event.is_set(): self._auto_log_msg("[已停止]"); self.q.put(("done",None)); return
+            bridge = SimAdapter(kp=best_p, ki=best_i, target=tgt, motor_params=motor_params)
+            m = collect(bridge, best_p, best_i, test_d)
+            if m is None: self._auto_log_msg("[已停止]"); self.q.put(("done",None)); return
+            sc = score_d(m)
+            observations_d.append((test_d, sc, m))
+            sm = m["steady"]; fm = m["full"]
+            tag = " ★" if sc == max(o[1] for o in observations_d) else ""
+            self._auto_log_msg(f"  D={test_d:4.1f} → err={sm['avg_error']:.1f} 超调={fm['overshoot']:.1f}% 评分={sc:.1f}{tag}")
+
+        # D 精搜
+        self._auto_log_msg(f"  精搜 D (5 轮, 最佳点附近)...")
+        for rnd in range(5):
+            if self._stop_event.is_set(): break
+            best_obs_d = max(observations_d, key=lambda o: o[1])
+            best_sc_d = best_obs_d[1]
+            bd = best_obs_d[0]
+
+            # 在最佳 D 附近精细搜索 (范围逐轮缩小)
+            shrink = 0.6 ** rnd
+            d_step = max(0.05, bd * 0.2 * shrink + 0.1 * shrink)
+            d_cands = [max(0, round(bd + d, 2)) for d in [-d_step, 0, d_step]]
+            d_cands = [d for d in d_cands if d not in [o[0] for o in observations_d]]
+            if not d_cands:
+                self._auto_log_msg(f"  [{rnd+1}] 无新候选, 跳过")
+                continue
+
+            for dc in d_cands:
+                bridge = SimAdapter(kp=best_p, ki=best_i, target=tgt, motor_params=motor_params)
+                m = collect(bridge, best_p, best_i, dc)
+                if m is None: break
+                sc = score_d(m)
+                observations_d.append((dc, sc, m))
+                tag = " ★" if sc > best_sc_d else ""
+                sm = m["steady"]; fm = m["full"]
+                self._auto_log_msg(f"  [{rnd+1}] D={dc:4.2f} → err={sm['avg_error']:.1f} 超调={fm['overshoot']:.1f}% 评分={sc:.1f}{tag}")
+                if sc > best_sc_d: best_sc_d = sc
+
+        best_d = max(observations_d, key=lambda o: o[1])[0]
+        self.q.put(("pid", {"p": best_p, "i": best_i, "d": best_d}))
+        self._auto_log_msg(f"")
+        self._auto_log_msg(f"✓ 阶段2结论: D={best_d:.1f}")
+
+        # ── 最终验证 ──
+        self._auto_log_msg("")
+        self._auto_log_msg("═" * 50)
+        self._auto_log_msg(f"【最终验证】P={best_p:.1f} I={best_i:.1f} D={best_d:.1f}")
+        self._auto_log_msg("═" * 50)
+
+        bridge = make_bridge(best_p, best_i)
+        result = collect(bridge, best_p, best_i, best_d)
+        if result:
+            sm = result["steady"]; fm = result["full"]
+            self._auto_log_msg(f"  速度: {sm['avg_speed']:.1f} / {tgt}")
+            self._auto_log_msg(f"  有效值: {sm['valid_ratio']*100:.0f}% (target±0.3)")
+            self._auto_log_msg(f"  稳态波动: {sm['fluctuation']:.2f}")
+            self._auto_log_msg(f"  瞬态超调: {fm['overshoot']:.1f}%")
+            self._auto_log_msg(f"  稳态误差: {sm['steady_state_error']:.1f}")
+            score = max(0, 100 - sm['avg_error']*2 - fm['overshoot']*0.3)
+            self.q.put(("score", f"{score:.0f}%"))
+            self.q.put(("rec", f"P={best_p:.1f} I={best_i:.1f} D={best_d:.1f}"))
+
+        # 清理硬件连接
+        if use_hw and hw_bridge:
+            try: hw_bridge.disconnect()
+            except: pass
+
+        self._auto_log_msg("")
+        self._auto_log_msg("✅ 引导调参完成!")
+        self.q.put(("done", None))
 
     def _auto_log_msg(self,msg):self.q.put(("auto_log",msg))
 
@@ -790,13 +1073,15 @@ class App:
         self.running=False
 
     def _m_run_sim(self,p,i,d,tests,sec,tgt):
-        """仿真模式测试"""
+        """仿真模式测试 — 同一个 sim 连续运行, 不重置"""
         from PID_DEMO.car_model import CarSimulator
         from PID_DEMO.buffer import SpeedBuffer
         all_m=[]
+        motor_params = self.config.get("SIM_MOTOR_PARAMS", None)
+        sim=CarSimulator(motor_params=motor_params);sim.target=tgt;sim.set_pid(p,i,d)
+        self.q.put(("target",tgt))
         for ti in range(tests):
             if self._stop_event.is_set():self._m_log_msg("[已停止]");break
-            sim=CarSimulator();sim.target=tgt;sim.set_pid(p,i,d)
             buf=SpeedBuffer(200)
             for _ in range(int(sec*50)):
                 s=sim.step();buf.add(s)
@@ -821,7 +1106,8 @@ class App:
         from PID_DEMO.car_model import CarSimulator
         from PID_DEMO.buffer import SpeedBuffer
         from PID_DEMO.llm.client import LLMTuner
-        sim=CarSimulator();sim.target=tgt;sim.set_pid(p,i,d)
+        motor_params = self.config.get("SIM_MOTOR_PARAMS", None)
+        sim=CarSimulator(motor_params=motor_params);sim.target=tgt;sim.set_pid(p,i,d)
         buf=SpeedBuffer(200)
         for _ in range(250):
             s=sim.step();buf.add(s)
@@ -844,6 +1130,62 @@ class App:
 
     def _m_log_msg(self,msg):self.q.put(("m_log",msg))
 
+    # ═══ 仿真设置页面 ═══
+    def _build_sim_cfg(self):
+        pg=tk.Frame(self._center,bg=C["bg"]);self._pages["sim_cfg"]=pg
+        c=_card(pg);c.pack(fill=tk.BOTH,expand=True)
+        _section_label(c,"仿真电机参数","匹配真实 MG310 + TB6612 物理特性")
+
+        sim_params = self.config.get("SIM_MOTOR_PARAMS", {})
+        from PID_DEMO.car_model import DEFAULT_MOTOR_PARAMS
+        defaults = dict(DEFAULT_MOTOR_PARAMS)
+        defaults.update(sim_params)
+
+        self._sim_vars = {}
+        rows = [
+            ("base_speed",   "基础速度",  "无控制量时电机转速 (脉冲/20ms)", "50"),
+            ("max_speed",    "最大速度",  "满 PWM 时电机转速",             "120"),
+            ("deadzone",     "PWM 死区",  "低于此值电机不转",             "800"),
+            ("inertia",      "惯性系数",  "响应延迟 (步数, 越大越慢)",    "4"),
+            ("noise",        "噪声幅度",  "速度噪声标准差",               "0.5"),
+            ("control_limit","控制上限",  "PID 输出限幅",                 "1200"),
+        ]
+        for key, label, tip, fallback in rows:
+            rw=tk.Frame(c,bg=C["card"]);rw.pack(fill=tk.X,pady=3)
+            _lbl(rw,label,F["b"],C["sub"],width=12,anchor=tk.W).pack(side=tk.LEFT)
+            v=tk.StringVar(value=str(defaults.get(key, fallback)))
+            tk.Entry(rw,textvariable=v,font=F["m"],fg=C["text"],bg=C["bg"],
+                     relief=tk.FLAT,width=8,insertbackground=C["accent"],
+                     highlightbackground=C["border"],highlightthickness=1).pack(side=tk.LEFT,ipady=3,padx=(0,8))
+            _lbl(rw,tip,F["s"],C["muted"]).pack(side=tk.LEFT)
+            self._sim_vars[key]=v
+
+        btn_row=tk.Frame(c,bg=C["card"]);btn_row.pack(pady=(16,0))
+        _btn(btn_row,"保存仿真参数",self._save_sim_cfg,pri=True).pack(side=tk.LEFT,padx=(0,8))
+        _btn(btn_row,"恢复默认",self._reset_sim_cfg).pack(side=tk.LEFT)
+
+    def _save_sim_cfg(self):
+        params = {}
+        for key, v in self._sim_vars.items():
+            try: params[key] = float(v.get())
+            except: pass
+        self.config["SIM_MOTOR_PARAMS"] = params
+        # 写入 config.json
+        try:
+            import json
+            cfg = dict(self.config)
+            with open(self._cfg_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            messagebox.showinfo("", "仿真参数已保存")
+        except Exception as e:
+            messagebox.showerror("", str(e))
+
+    def _reset_sim_cfg(self):
+        from PID_DEMO.car_model import DEFAULT_MOTOR_PARAMS
+        for key, val in DEFAULT_MOTOR_PARAMS.items():
+            if key in self._sim_vars:
+                self._sim_vars[key].set(str(val))
+
     # ═══ LLM 设置页面 ═══
     def _build_settings(self):
         pg=tk.Frame(self._center,bg=C["bg"]);self._pages["settings"]=pg
@@ -855,8 +1197,8 @@ class App:
         _lbl(r0,"快捷模板:",F["b"],C["sub"]).pack(side=tk.LEFT,padx=(0,6))
 
         self.PRESETS={
-            "DeepSeek":  {"url":"https://api.deepseek.com/v1","model":"deepseek-v4-pro[1m]","provider":"openai",
-                          "models":["deepseek-v4-pro[1m]","deepseek-v4-pro","deepseek-chat","deepseek-reasoner"]},
+            "DeepSeek":  {"url":"https://api.deepseek.com","model":"deepseek-v4-pro","provider":"openai",
+                          "models":["deepseek-v4-pro","deepseek-v4-flash","deepseek-chat","deepseek-reasoner"]},
             "ChatGPT":   {"url":"https://api.openai.com/v1","model":"gpt-5.1","provider":"openai",
                           "models":["gpt-5.1","gpt-5","gpt-4.1","o4-mini"]},
             "MiniMax":   {"url":"https://api.minimax.chat/v1","model":"MiniMax-M2.5","provider":"openai",
@@ -909,7 +1251,14 @@ class App:
         mc.bind("<FocusIn>",lambda e:mc.config(values=sorted(set(m for p in self.PRESETS.values() for m in p["models"]))))
         self._sv["LLM_MODEL_NAME"]=self._model_var
 
-        _btn(c,"保存配置",self._save_cfg,pri=True).pack(pady=(16,0))
+        # 状态行
+        self._llm_status_var=tk.StringVar(value="")
+        tk.Label(c,textvariable=self._llm_status_var,font=F["s"],fg=C["sub"],bg=C["card"],wraplength=500,justify=tk.LEFT).pack(fill=tk.X,pady=(8,0))
+
+        # 按钮行
+        btn_row=tk.Frame(c,bg=C["card"]);btn_row.pack(pady=(8,0))
+        _btn(btn_row,"保存配置",self._save_cfg,pri=True).pack(side=tk.LEFT,padx=(0,8))
+        _btn(btn_row,"测试连接",self._test_llm).pack(side=tk.LEFT)
 
     def _apply_preset(self,presets=None):
         name=self._preset_var.get()
@@ -936,9 +1285,36 @@ class App:
         for k in DEFAULT_CONFIG:
             if k not in cfg:cfg[k]=DEFAULT_CONFIG[k]
         try:
-            with open("config.json","w",encoding="utf-8") as f:json.dump(cfg,f,indent=2,ensure_ascii=False)
+            with open(self._cfg_path,"w",encoding="utf-8") as f:json.dump(cfg,f,indent=2,ensure_ascii=False)
             self.config=cfg;messagebox.showinfo("","配置已保存")
         except Exception as e:messagebox.showerror("",str(e))
+
+    def _test_llm(self):
+        """测试 LLM 连接"""
+        self._llm_status_var.set("测试中...")
+        self.root.update()
+        def do_test():
+            try:
+                # 从 GUI 控件读取当前值
+                cfg=dict(self.config)
+                cfg["LLM_API_KEY"]=self._sv["LLM_API_KEY"].get()
+                cfg["LLM_API_BASE_URL"]=self._sv["LLM_API_BASE_URL"].get()
+                cfg["LLM_MODEL_NAME"]=self._model_var.get()
+                cfg["LLM_PROVIDER"]=self._prov_var.get()
+                key=cfg["LLM_API_KEY"]; url=cfg["LLM_API_BASE_URL"]; model=cfg["LLM_MODEL_NAME"]
+                if not key or key=="sk-your-key-here":
+                    self.q.put(("llm_status","❌ API Key 未填写"));return
+                self.q.put(("llm_status",f"连接 {url} ..."))
+                from PID_DEMO.llm.client import LLMTuner
+                tuner=LLMTuner(cfg)
+                res=tuner.analyze("speed=50 target=60 error=10 overshoot=0%")
+                if res and res.get("p",0)>0:
+                    self.q.put(("llm_status",f"✅ 成功! 模型={model} 返回 P={res['p']:.2f} I={res['i']:.2f}"))
+                else:
+                    self.q.put(("llm_status",f"❌ 返回无效: {tuner.last_error}"))
+            except Exception as e:
+                self.q.put(("llm_status",f"❌ 错误: {e}"))
+        threading.Thread(target=do_test,daemon=True).start()
 
     # ═══ 消息轮询 ═══
     def _poll(self):
@@ -965,6 +1341,7 @@ class App:
                 manual_logs.append(str(data))
             elif tp=="score":self._score_var.set(str(data))
             elif tp=="rec":self._rec_var.set(str(data))
+            elif tp=="llm_status":self._llm_status_var.set(str(data))
             elif tp=="done":
                 self.running=False;self._stop_event.clear()
                 if hasattr(self,'_auto_btn'):
