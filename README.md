@@ -77,9 +77,9 @@
 ## 先看你该怎么用
 
 - **想用 AI 自动生成代码，不想记引脚和 API**：走 Skill 路线，见 [Claude Code Skill](#claude-code-skill-完整指南)。
-- **已经有电赛小车，想看现有代码怎么写的**：直接看 `workspace_ccstheia/mpu6050_clean/`，最干净的基线工程。
+- **已经有电赛小车，想看现有代码怎么写的**：直接看 `03_Fireware/MPU6050_Clean/`，最干净的基线工程。
 - **想从零搭一辆电赛小车**：按 [推荐学习路径](#推荐学习路径) 从基础外设逐步搭建。
-- **想基于 K230 做视觉追踪**：看 `workspace_ccstheia/test_2/` 和 [K230 视觉方案](#k230-视觉方案)。
+- **想基于 K230 做视觉追踪**：看 `03_Fireware/K230_Vision_Track/` + `04_Software/K230/` 和 [K230 视觉方案](#k230-视觉方案)。
 - **想深入了解内部设计**：看 `.claude/skills/mspm0g-contest/SKILL.md`。
 
 ## 演示视频
@@ -136,7 +136,7 @@ cd mspm0g-contest-skill
 
 ### VS Code 用户
 
-工程已配好 `.vscode/c_cpp_properties.json`，直接打开 `workspace_ccstheia` 根目录即可。
+各工程已配好 `.vscode/c_cpp_properties.json`，直接打开对应的固件工程目录即可。
 
 ---
 
@@ -222,55 +222,102 @@ cd mspm0g-contest-skill
 ## 工程目录详解
 
 ```
-workspace_ccstheia/
-├── mpu6050_clean/               [基线工程 - 推荐入门]
-│   ├── main.c                     系统初始化 + 主循环
-│   ├── pid_ctrl.c/h               增量式速度PI + 航向PD
-│   ├── oled.c/h                   SSD1306 I2C 驱动
-│   ├── mpu_port.c/h               MPU6050 DMP 移植层
-│   ├── encoder.c/h                编码器 4倍频解码
-│   ├── motor.c/h                  电机 PWM + 方向控制
-│   └── empty.syscfg               SysConfig 引脚配置
+mspm0g-contest-skill/
+├── README.md                              ← 项目总览（本文件）
+├── .claude/                               ← Claude Code Skill 定义（勿动）
 │
-├── imu601/                       [IMU601 UART方案 + 90度转弯]
-│   ├── empty.c                     直行 + 原地旋转
-│   ├── imu601.c/h                  ATKP 协议解析
-│   └── motor.c/h                  电机控制
+├── 00_ProjectManagement/                  ← 项目管理文档
+│   └── (开发计划、任务跟踪、会议纪要)
 │
-├── jdy31_pid_test/               [蓝牙 PID 在线调参]
-│   ├── main.c                     BLE 通信 + PID 修改
-│   └── _jdy31_docs/              JDY-31 AT 指令
+├── 00_Reference/                          ← 参考材料
+│   ├── pid_tuner_config.md                PID 调试助手配置说明
+│   └── (数据手册、API 文档、协议规范)
 │
-├── pid_tuner_car/                [PID 调试助手实车工程]
-│   ├── main.c                     PA25 启停 + 20ms 速度闭环
-│   ├── pid_tuner.c/h              UART0 CSV/SET/TARGET/STATUS 协议
-│   ├── motor.c/h                  TB6612FNG 电机控制
-│   └── encoder.c/h                PA15/PA17 编码器测速
+├── 01_FuntionMap/                         ← 功能 / 特性 / 引脚映射
+│   ├── PINMAP.md                          基线工程引脚分配表
+│   └── (竞赛题目与模块功能对应)
 │
-├── servo_test/                   [舵机云台]
-│   ├── main.c                     MPU6050 -> 舵机随动
-│   └── gimbal.c/h                 云台限幅/平滑
+├── 02_Hardware/                           ← 硬件设计文件
+│   └── KiCad/                             天猛星开发板 KiCad 原理图
+│       ├── TianMengXing.sch
+│       ├── TianMengXing.lib
+│       └── TianMengXing.pro
 │
-├── test_2/                       [K230 视觉追踪 - 双芯全功能]
-│   ├── empty.c                     UART接收 + 舵机跟踪
-│   ├── k230_servo_track.py        色块追踪脚本
-│   ├── k230_shape_detect.py       形状检测脚本
-│   └── docs/                      通信协议文档
+├── 03_Fireware/                           ← MSPM0G3507 固件工程
+│   ├── MPU6050_Clean/                     [基线工程 - 推荐入门]
+│   │   ├── main.c                         系统初始化 + 主循环
+│   │   ├── pid_ctrl.c/h                   增量式速度PI + 航向PD
+│   │   ├── oled.c/h                       SSD1306 I2C 驱动
+│   │   ├── mpu_port.c/h                   MPU6050 DMP 移植层
+│   │   ├── encoder.c/h                    编码器 4倍频解码
+│   │   ├── motor.c/h                      电机 PWM + 方向控制
+│   │   └── empty.syscfg                   SysConfig 引脚配置
+│   │
+│   ├── IMU601/                            [IMU601 UART方案 + 90度转弯]
+│   │   ├── imu601.c/h                     ATKP 协议解析
+│   │   └── motor.c/h                      电机控制
+│   │
+│   ├── K230_Vision_Track/                 [K230 视觉追踪 - 双芯全功能]
+│   │   ├── empty.c                        UART接收 + 舵机跟踪
+│   │   ├── servo_k230.c/h                 舵机控制
+│   │   └── docs/                          通信协议文档
+│   │
+│   ├── PID_Tuner_Car/                     [PID 调试助手实车工程]
+│   │   ├── main.c                         PA25 启停 + 20ms 速度闭环
+│   │   ├── motor.c/h                      TB6612FNG 电机控制
+│   │   └── encoder.c/h                    PA15/PA17 编码器测速
+│   │
+│   ├── Servo_Test/                        [舵机云台]
+│   │   ├── main.c                         MPU6050 → 舵机随动
+│   │   └── gimbal.c/h                     云台限幅/平滑
+│   │
+│   ├── JDY31_PID_Test/                    [蓝牙 PID 在线调参]
+│   │   ├── main.c                         BLE 通信 + PID 修改
+│   │   └── _jdy31_docs/                  JDY-31 AT 指令
+│   │
+│   ├── Basic_Periph/                      [基础外设测试]
+│   ├── MPU6050_Base/                      [MPU6050 原始工程 - 未清理]
+│   │
+│   ├── Contest/                           [电赛真题方案]
+│   │   └── 25E_Receiver/                  2025 E 题接收端
+│   │
+│   └── Periph_Ref/                        [外设参考驱动 - 可直接复制]
+│       ├── Encoder_Poll/                  编码器轮询测速
+│       ├── IR_Tracking/                   红外循迹传感器
+│       ├── Motor_TB6612/                  TB6612 电机驱动
+│       ├── Motor_TB6612_Verified/         TB6612 电机驱动验证版
+│       ├── MPU6050_Driver/                MPU6050 I2C 驱动
+│       ├── OLED_I2C/                      SSD1306 OLED I2C 驱动
+│       ├── PID_Speed/                     PID 速度闭环
+│       └── Servo_SG90/                    SG90 舵机 PWM 驱动
 │
-├── mpu6050/                      [MPU6050 原始工程]
-├── my_TI/                        [基础外设测试]
-├── test_1/                       [PID 参数调优]
+├── 04_Software/                           ← 软件代码
+│   └── K230/                              K230 庐山派 MicroPython 脚本
+│       ├── k230_cam_test.py               摄像头基础测试
+│       ├── k230_cam_test_25e.py            25E 竞赛视觉（A4黑框检测）
+│       ├── k230_servo_track.py            色块追踪（主脚本）
+│       ├── k230_servo_track_v2.py         色块追踪 v2
+│       ├── k230_wheeltec_track.py         Wheeltec 协议追踪
+│       ├── k230_shape_detect.py           形状检测
+│       ├── k230_triangle_detect.py        三角形检测
+│       ├── k230_rect_detect.py            矩形检测
+│       ├── k230_rect_track.py             矩形追踪
+│       ├── k230_touch_tuner.py            触摸屏调参
+│       ├── k230_touch_test.py             触摸屏测试
+│       ├── k230_sensor_diag.py            传感器诊断
+│       ├── k230_cam_lcd_test.py           摄像头 + LCD 联调
+│       ├── k230_uart_all_test.py          UART 全通道测试
+│       └── servo_test_minimal.py          舵机最小测试
 │
-├── PID调试助手/                  [Python PID 上位机]
-│   ├── PID_DEMO/                  GUI、串口桥接、自动调参引擎
-│   ├── config.example.json        配置模板
-│   ├── requirements.txt           Python 依赖
-│   └── build_exe.bat              Windows exe 打包脚本
+├── 05_Mechanical/                         ← 机械设计
+│   └── (CAD 图纸、3D 模型、装配说明)
 │
-├── empty_LP_MSPM0G3507_nortos_ticlang/  [空工程模板]
-│
-└── .vscode/
-    └── c_cpp_properties.json     [IntelliSense 依赖库配置]
+└── 06_Tools/                              ← 开发工具
+    └── PID_Tuner/                         Python PID 调试上位机
+        ├── PID_DEMO/                      GUI、串口桥接、自动调参引擎
+        ├── config.example.json            配置模板
+        ├── requirements.txt               Python 依赖
+        └── build_exe.bat                  Windows exe 打包脚本
 ```
 
 ---
@@ -347,12 +394,12 @@ workspace_ccstheia/
 
 ### PID 调试助手配置方法
 
-`PID调试助手/` 是一个 Python 上位机，支持仿真调参、串口连接 MSPM0G 实机、实时曲线显示和 LLM 辅助推荐 PID 参数。
+`06_Tools/PID_Tuner/` 是一个 Python 上位机，支持仿真调参、串口连接 MSPM0G 实机、实时曲线显示和 LLM 辅助推荐 PID 参数。
 
 #### 1. 安装依赖
 
 ```bash
-cd PID调试助手
+cd 06_Tools/PID_Tuner
 python -m pip install -r requirements.txt
 ```
 
@@ -434,7 +481,7 @@ RESET
 
 协议硬性要求：PID 调试助手只支持 `timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki` 九字段 CSV，以及 `SET` / `TARGET` / `STATUS` / `RESET` / `STOP` 文本命令。`TARGET L:x R:x` 必须能回 `OK TARGET L=x R=x`，否则自动调参会停止；若仍看到 CSV 里的目标是 `20,20`，优先检查 CH340 TX 是否接到 PA11(RX)。
 
-上位机内置协议定义在 `PID调试助手/PID_DEMO/protocol.py`，固件协议说明在 `.claude/skills/mspm0g-contest/pid_tuner_protocol.md`。后续新增 PID 调试工程必须沿用这套协议，不能自行改字段顺序或回包格式。
+上位机内置协议定义在 `06_Tools/PID_Tuner/PID_DEMO/protocol.py`，固件协议说明在 `.claude/skills/mspm0g-contest/pid_tuner_protocol.md`。后续新增 PID 调试工程必须沿用这套协议，不能自行改字段顺序或回包格式。
 
 MSPM0G 需要持续输出 CSV 采样数据，至少包含以下字段顺序：
 
@@ -452,7 +499,7 @@ timestamp_ms,speed_L,speed_R,target_L,target_R,pwm_L,pwm_R,Kp,Ki
 #### 6. 打包 Windows exe
 
 ```bash
-cd PID调试助手
+cd 06_Tools/PID_Tuner
 build_exe.bat
 ```
 

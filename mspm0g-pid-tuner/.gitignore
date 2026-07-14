@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-__pycache__/
-*.pyc
-build/
-dist/
-release/
-config.json
-.spec

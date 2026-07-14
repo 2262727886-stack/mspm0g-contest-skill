@@ -44,6 +44,10 @@ __pycache__/
 build/
 dist/
 *.spec
+*.o
+*.d
+Debug/
+.clangd/
 
 # 其他项目 (不相关)
 .GameAssistBox/
